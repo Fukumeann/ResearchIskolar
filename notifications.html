@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout: Sidebar + Main -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">u</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1><i class="fas fa-bell"></i> Notifications</h1>
+                <p>Stay updated with your research activities and community interactions</p>
+            </div>
+
+            <div class="notification-controls">
+                <div class="filter-tabs">
+                    <button class="tab-btn active">All</button>
+                    <button class="tab-btn">Unread</button>
+                    <button class="tab-btn">Papers</button>
+                    <button class="tab-btn">Questions</button>
+                    <button class="tab-btn">Comments</button>
+                </div>
+                <div class="notification-actions">
+                    <button class="btn btn-secondary">Mark All as Read</button>
+                    <button class="btn btn-secondary">Settings</button>
+                </div>
+            </div>
+
+            <div class="notifications-list">
+
+                <div class="notification-item unread">
+                    <div class="notification-icon">
+                        <span class="icon">💬</span>
+                    </div>
+                    <div class="notification-content">
+                        <h4>New Comment on Your Question</h4>
+                        <p>Allen Dinglas answered to your question about "Mataba ba si Ash?"</p>
+                        <span class="notification-time">3 weeks ago</span>
+                    </div>
+                    <div class="notification-actions">
+                        <button class="btn-icon" title="Mark as read">✓</button>
+                        <button class="btn-icon" title="Dismiss">×</button>
+                    </div>
+                </div>
+
+                <!--<div class="notification-settings">
+                    <h3>Notification Preferences</h3>
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" checked />
+                                Email notifications for new citations
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" checked />
+                                Weekly research digest
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" checked />
+                                New paper recommendations
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" />
+                                Collaboration requests
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" checked />
+                                Question and answer notifications
+                            </label>
+                        </div>
+                        <div class="setting-item">
+                            <label>
+                                <input type="checkbox" />
+                                Marketing emails
+                            </label>
+                        </div>
+                    </div>
+                    <button class="btn">Save Preferences</button>
+                </div> -->
+        </main>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

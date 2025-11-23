@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar - Published Papers</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <div class="header-content">
+                    <div>
+                        <h1><i class="fas fa-file-alt"></i> My Published Papers</h1>
+                        <p>View, manage, and track your uploaded research papers</p>
+                    </div>
+                    <button class="btn" id="openSubmitPaperBtn">
+                        <i class="fas fa-upload"></i> Submit New Paper
+                    </button>
+                </div>
+            </div>
+
+            <!-- User's Published Papers -->
+            <section class="my-papers-section">
+                <div id="myPapersContainer" class="publications-list">
+                    <!-- Sample Paper Card (will be dynamically populated) -->
+                    <div class="paper-card">
+                        <h3 class="paper-title">Loading papers...</h3>
+                        <div class="paper-meta">
+                            <span><i class="fas fa-clock"></i> Please wait</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Submit Paper Modal -->
+    <div class="modal" id="submitPaperModal" aria-hidden="true">
+        <div class="modal-content form-modal">
+            <button class="close-modal-btn" id="closeSubmitPaperModal">&times;</button>
+            <h2><i class="fas fa-paper-plane"></i> Submit New Paper</h2>
+            <p>Share your research with the academic community. Fill out the details below to submit your paper for
+                review.</p>
+
+            <form id="paperUploadForm" class="form-container">
+                <div class="form-grid">
+                    <div class="form-group full-width">
+                        <label for="paperTitle">Paper Title</label>
+                        <input type="text" id="paperTitle" class="form-input"
+                            placeholder="Enter the full title of your research paper" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="paperAuthors">Authors</label>
+                        <input type="text" id="paperAuthors" class="form-input"
+                            placeholder="List all authors (separated by commas)" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="paperCategory">Category</label>
+                        <select id="paperCategory" class="form-select">
+                            <option value="">Select a category</option>
+                            <option>Computer Science</option>
+                            <option>Medicine</option>
+                            <option>Physics</option>
+                            <option>Chemistry</option>
+                            <option>Biology</option>
+                            <option>Psychology</option>
+                            <option>Economics</option>
+                            <option>Mathematics</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label for="paperAbstract">Abstract</label>
+                        <textarea id="paperAbstract" class="form-textarea"
+                            placeholder="Provide a brief summary of your research paper" rows="5" required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="paperTags">Tags</label>
+                        <input type="text" id="paperTags" class="form-input"
+                            placeholder="e.g., Machine Learning, Data Analysis (comma-separated)">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="paperFileUrl">Paper URL</label>
+                        <input type="url" id="paperFileUrl" class="form-input" placeholder="Link to your paper (PDF)">
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelSubmitPaper">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-paper-plane"></i> Submit for Review
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="notificationModal" aria-hidden="true">
+        <div class="modal-content" id="notificationModalContent">
+            <h2 id="notificationTitle" class="modal-title">Notification</h2>
+            <p id="notificationMessage"></p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="closeNotificationBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon"><i class="fas fa-sign-out-alt"></i></div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

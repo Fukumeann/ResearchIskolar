@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout: Sidebar + Main -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1><i class="fas fa-info-circle"></i> About ResearchScholar</h1>
+                <p>Connecting researchers worldwide through knowledge sharing and collaboration</p>
+            </div>
+
+            <div class="about-content">
+                <div class="content-container">
+                    <div class="about-section">
+                        <h2><i class="fas fa-bullseye"></i> Our Mission</h2>
+                        <div class="section-content">
+                            <p>ResearchScholar is dedicated to fostering a global community of researchers, scientists,
+                                and academics. We believe that knowledge should be freely accessible and that
+                                collaboration accelerates discovery. Our platform serves as a bridge between
+                                researchers, enabling them to share findings, ask questions, and work together to
+                                advance human knowledge.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-container">
+                    <div class="about-section">
+                        <h2><i class="fas fa-tasks"></i> What We Do</h2>
+                        <div class="section-content">
+                            <div class="features-grid">
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-book"></i></div>
+                                    <h3>Research Library</h3>
+                                    <p>Build and manage your personal collection of research papers, articles, and
+                                        publications from various disciplines.</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-search"></i></div>
+                                    <h3>Smart Search</h3>
+                                    <p>Discover relevant research using our advanced search algorithms and personalized
+                                        recommendations.</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-comments"></i></div>
+                                    <h3>Q&A Community</h3>
+                                    <p>Ask questions, share knowledge, and collaborate with researchers from around the
+                                        world.</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
+                                    <h3>Research Analytics</h3>
+                                    <p>Track your research impact, citations, and academic progress with comprehensive
+                                        analytics.</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-users"></i></div>
+                                    <h3>Collaboration Tools</h3>
+                                    <p>Connect with researchers, form study groups, and collaborate on research
+                                        projects.</p>
+                                </div>
+                                <div class="feature-card">
+                                    <div class="feature-icon"><i class="fas fa-bell"></i></div>
+                                    <h3>Smart Notifications</h3>
+                                    <p>Stay updated with personalized notifications about new papers, citations, and
+                                        community activity.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-container">
+                    <div class="about-section">
+                        <h2><i class="fas fa-heart"></i> Our Values</h2>
+                        <div class="section-content">
+                            <div class="values-list">
+                                <div class="value-item">
+                                    <h4><i class="fas fa-unlock"></i> Open Access</h4>
+                                    <p>We believe research should be freely accessible to everyone, promoting global
+                                        knowledge sharing and scientific advancement.</p>
+                                </div>
+                                <div class="value-item">
+                                    <h4><i class="fas fa-handshake"></i> Collaboration</h4>
+                                    <p>We foster interdisciplinary collaboration, believing that the best discoveries
+                                        come from diverse perspectives working together.</p>
+                                </div>
+                                <div class="value-item">
+                                    <h4><i class="fas fa-star"></i> Quality</h4>
+                                    <p>We maintain high standards for research content and community interactions,
+                                        ensuring reliable and valuable resources.</p>
+                                </div>
+                                <div class="value-item">
+                                    <h4><i class="fas fa-lightbulb"></i> Innovation</h4>
+                                    <p>We continuously innovate our platform to better serve the research community and
+                                        adapt to changing needs.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </main>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

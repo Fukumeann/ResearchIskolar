@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout: Sidebar + Main -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="welcome-section">
+                <i class="fas fa-graduation-cap welcome-icon"></i>
+                <p class="welcome-text">Welcome to ResearchScholar! Browse papers or log in to access more features.</p>
+            </div>
+            <!-- Centered Search Bar -->
+            <div class="search-container">
+                <input type="text" class="search-input" id="searchInput" placeholder="Search research papers..." />
+                <button class="btn" id="searchBtn"><i class="fas fa-search"></i> Search</button>
+            </div>
+            <div id="searchResultsContainer" class="search-results"></div>
+            <!-- Paper Detail Modal -->
+            <div class="modal" id="paperDetailModal" aria-hidden="true">
+                <div class="modal-content" role="dialog" aria-modal="true" id="paperDetailContent">
+                    <button class="close-modal-btn" id="closePaperDetailModal">&times;</button>
+                    <h2 id="paperTitle" class="modal-title">Paper title</h2>
+                    <div style="text-align:left; margin-top: .5rem;">
+                        <p><strong>Authors:</strong> <span id="paperAuthors"></span></p>
+                        <p><strong>Category:</strong> <span id="paperCategory"></span></p>
+                        <p><strong>Uploaded:</strong> <span id="paperDate"></span></p>
+                        <div id="paperTags" style="margin: .5rem 0;"></div>
+                        <hr />
+                        <p id="paperAbstract" style="white-space:pre-line;"></p>
+                        <div style="margin-top:1rem; display:flex; gap:.5rem; justify-content:flex-end;">
+                            <a id="downloadPaperBtn" class="btn btn-secondary" target="_blank" rel="noopener">View /
+                                Download</a>
+                            <button id="closePaperDetailBtn" class="btn">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Browse by Category -->
+            <div class="browse-categories">
+                <h3><i class="fas fa-th-large"></i> Browse by Category</h3>
+                <div class="category-grid">
+                    <div class="category-card" onclick="browseCategory('Computer Science')">
+                        <i class="fas fa-laptop-code"></i>
+                        <h4>Computer Science</h4>
+                        <p>AI, Machine Learning, Software Engineering</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Medicine')">
+                        <i class="fas fa-heartbeat"></i>
+                        <h4>Medicine</h4>
+                        <p>Healthcare, Medical Research, Clinical Studies</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Physics')">
+                        <i class="fas fa-atom"></i>
+                        <h4>Physics</h4>
+                        <p>Quantum Physics, Astrophysics, Particle Physics</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Chemistry')">
+                        <i class="fas fa-flask"></i>
+                        <h4>Chemistry</h4>
+                        <p>Organic Chemistry, Materials Science, Catalysis</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Biology')">
+                        <i class="fas fa-dna"></i>
+                        <h4>Biology</h4>
+                        <p>Genetics, Ecology, Molecular Biology</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Psychology')">
+                        <i class="fas fa-brain"></i>
+                        <h4>Psychology</h4>
+                        <p>Cognitive Science, Behavioral Studies, Mental Health</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Economics')">
+                        <i class="fas fa-chart-line"></i>
+                        <h4>Economics</h4>
+                        <p>Macroeconomics, Finance, Market Analysis</p>
+                    </div>
+                    <div class="category-card" onclick="browseCategory('Mathematics')">
+                        <i class="fas fa-calculator"></i>
+                        <h4>Mathematics</h4>
+                        <p>Statistics, Algebra, Applied Mathematics</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLoginModal">&times;</button>
+            <h2 class="modal-title">Log in</h2>
+            <form id="loginForm">
+                <input type="email" class="form-input" placeholder="Email" required autocomplete="email" />
+                <div class="password-container">
+                    <input type="password" class="form-input" id="loginPassword" placeholder="Password" required
+                        autocomplete="current-password" />
+                    <button type="button" class="password-toggle" id="loginPasswordToggle">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+                <button type="submit" class="btn">Log in</button>
+            </form>
+            <div class="auth-switch">
+                <p>Don't have an account? <a href="#" id="switchToRegister">Create an account</a></p>
+            </div>
+            <hr class="form-divider" />
+            <button class="btn btn-google" id="googleLoginBtn">
+                <i class="fab fa-google"></i> Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Register Modal -->
+    <div class="modal" id="registerModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeRegisterModal">&times;</button>
+            <h2 class="modal-title">Register</h2>
+
+            <form id="registerForm">
+                <input type="text" id="registerName" class="form-input" placeholder="Full Name" required
+                    autocomplete="name" />
+                <input type="email" id="registerEmail" class="form-input" placeholder="Email" required
+                    autocomplete="username" />
+                <div class="password-container">
+                    <input type="password" id="registerPassword" class="form-input" placeholder="Password" required
+                        autocomplete="new-password" />
+                    <button type="button" class="password-toggle" id="registerPasswordToggle">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
+
+                <div class="password-suggestions" id="passwordSuggestions" style="display: none;">
+                    <p class="suggestion-title">Password should contain:</p>
+                    <ul class="suggestion-list">
+                        <li id="lengthCheck" class="suggestion-item">At least 8 characters</li>
+                        <li id="uppercaseCheck" class="suggestion-item">One uppercase letter</li>
+                        <li id="lowercaseCheck" class="suggestion-item">One lowercase letter</li>
+                        <li id="numberCheck" class="suggestion-item">One number</li>
+                        <li id="specialCheck" class="suggestion-item">One special character</li>
+                    </ul>
+                </div>
+
+                <button type="submit" class="btn">Register</button>
+            </form>
+
+            <div class="auth-switch">
+                <p>Already have an account? <a href="#" id="switchToLogin">Log in</a></p>
+            </div>
+            <hr class="form-divider" />
+            <button class="btn btn-google" id="googleRegisterBtn">
+                <i class="fab fa-google"></i> Sign up with Google
+            </button>
+        </div>
+    </div>
+
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+    <!-- Access Restricted Modal -->
+    <div class="modal" id="accessRestrictedModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeAccessRestricted">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-ban"></i>
+            </div>
+            <h2 class="modal-title">Access Restricted</h2>
+            <p id="accessRestrictedMessage">Your account has been restricted.</p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="closeAccessRestricted">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

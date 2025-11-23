@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout: Sidebar + Main -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1>My Library</h1>
+                <p>Your personal collection of research papers and documents</p>
+            </div>
+
+            <div class="library-controls">
+                <div class="search-container">
+                    <input type="text" class="search-input" placeholder="Search your library..." />
+                    <button class="btn">Search</button>
+                </div>
+                <div class="filter-controls">
+                    <select class="form-select">
+                        <option>All Categories</option>
+                        <option>Computer Science</option>
+                        <option>Medicine</option>
+                        <option>Physics</option>
+                        <option>Chemistry</option>
+                        <option>Biology</option>
+                        <option>Psychology</option>
+                        <option>Economics</option>
+                        <option>Mathematics</option>
+                    </select>
+                    <select class="form-select">
+                        <option>Sort by Date</option>
+                        <option>Sort by Title</option>
+                        <option>Sort by Author</option>
+                        <option>Sort by Rating</option>
+                    </select>
+                </div>
+            </div>
+            <!--
+            <div class="library-content">
+                <div class="library-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">47</span>
+                        <span class="stat-label">Total Papers</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">12</span>
+                        <span class="stat-label">Favorites</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">8</span>
+                        <span class="stat-label">Reading Lists</span>
+                    </div>
+                </div>
+
+                <div class="papers-grid">
+                    <div class="paper-card">
+                        <div class="paper-header">
+                            <h3>Deep Learning for Image Recognition</h3>
+                            <div class="paper-actions">
+                                <button class="btn-icon" title="Add to Favorites">♡</button>
+                                <button class="btn-icon" title="Share">↗</button>
+                                <button class="btn-icon" title="Download">↓</button>
+                            </div>
+                        </div>
+                        <div class="paper-meta">
+                            <span class="author">Smith, J. et al.</span>
+                            <span class="year">2023</span>
+                            <span class="venue">ICML</span>
+                        </div>
+                        <p class="paper-abstract">This paper presents novel approaches to deep learning for image
+                            recognition tasks, achieving state-of-the-art performance on multiple benchmarks.</p>
+                        <div class="paper-tags">
+                            <span class="tag">Deep Learning</span>
+                            <span class="tag">Computer Vision</span>
+                            <span class="tag">CNN</span>
+                        </div>
+                        <div class="paper-footer">
+                            <span class="rating">★ 4.8</span>
+                            <span class="added-date">Added 2 days ago</span>
+                        </div>
+                    </div>
+
+                    <div class="paper-card">
+                        <div class="paper-header">
+                            <h3>Transformer Architecture in NLP</h3>
+                            <div class="paper-actions">
+                                <button class="btn-icon" title="Add to Favorites">❤</button>
+                                <button class="btn-icon" title="Share">↗</button>
+                                <button class="btn-icon" title="Download">↓</button>
+                            </div>
+                        </div>
+                        <div class="paper-meta">
+                            <span class="author">Johnson, A. et al.</span>
+                            <span class="year">2023</span>
+                            <span class="venue">NeurIPS</span>
+                        </div>
+                        <p class="paper-abstract">An in-depth analysis of transformer architectures and their
+                            applications in natural language processing tasks.</p>
+                        <div class="paper-tags">
+                            <span class="tag">NLP</span>
+                            <span class="tag">Transformers</span>
+                            <span class="tag">BERT</span>
+                        </div>
+                        <div class="paper-footer">
+                            <span class="rating">★ 4.9</span>
+                            <span class="added-date">Added 1 week ago</span>
+                        </div>
+                    </div>
+
+                    <div class="paper-card">
+                        <div class="paper-header">
+                            <h3>Reinforcement Learning in Robotics</h3>
+                            <div class="paper-actions">
+                                <button class="btn-icon" title="Add to Favorites">♡</button>
+                                <button class="btn-icon" title="Share">↗</button>
+                                <button class="btn-icon" title="Download">↓</button>
+                            </div>
+                        </div>
+                        <div class="paper-meta">
+                            <span class="author">Brown, K. et al.</span>
+                            <span class="year">2023</span>
+                            <span class="venue">ICRA</span>
+                        </div>
+                        <p class="paper-abstract">Exploring the applications of reinforcement learning algorithms in
+                            autonomous robotic systems.</p>
+                        <div class="paper-tags">
+                            <span class="tag">Robotics</span>
+                            <span class="tag">RL</span>
+                            <span class="tag">Autonomous Systems</span>
+                        </div>
+                        <div class="paper-footer">
+                            <span class="rating">★ 4.6</span>
+                            <span class="added-date">Added 2 weeks ago</span>
+                        </div>
+                    </div>
+
+                    <div class="paper-card">
+                        <div class="paper-header">
+                            <h3>Federated Learning: Privacy and Efficiency</h3>
+                            <div class="paper-actions">
+                                <button class="btn-icon" title="Add to Favorites">♡</button>
+                                <button class="btn-icon" title="Share">↗</button>
+                                <button class="btn-icon" title="Download">↓</button>
+                            </div>
+                        </div>
+                        <div class="paper-meta">
+                            <span class="author">Davis, L. et al.</span>
+                            <span class="year">2023</span>
+                            <span class="venue">ICLR</span>
+                        </div>
+                        <p class="paper-abstract">A comprehensive study on federated learning approaches balancing
+                            privacy preservation with computational efficiency.</p>
+                        <div class="paper-tags">
+                            <span class="tag">Federated Learning</span>
+                            <span class="tag">Privacy</span>
+                            <span class="tag">Distributed ML</span>
+                        </div>
+                        <div class="paper-footer">
+                            <span class="rating">★ 4.7</span>
+                            <span class="added-date">Added 3 weeks ago</span>
+                        </div>
+                    </div>
+                </div> -->
+            <div class="papers-grid" id="papersGrid">
+                <!-- Papers will be dynamically inserted here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

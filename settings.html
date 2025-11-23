@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout: Sidebar + Main -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1><i class="fas fa-cog"></i> Settings</h1>
+                <p>Customize your ResearchScholar experience</p>
+            </div>
+
+            <div class="settings-container">
+                <div class="settings-section">
+                    <h3>Account Settings</h3>
+                    <div class="settings-form">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" class="form-input" placeholder="Enter your username"
+                                value="" />
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email Address</label>
+                            <input type="email" id="email" class="form-input" placeholder="Enter your email" value="" />
+                        </div>
+                        <div class="form-group">
+                            <label for="currentPassword">Current Password</label>
+                            <input type="password" id="currentPassword" class="form-input" />
+                        </div>
+                        <div class="form-group">
+                            <label for="newPassword">New Password</label>
+                            <input type="password" id="newPassword" class="form-input" />
+                        </div>
+                        <div class="form-group">
+                            <label for="confirmPassword">Confirm New Password</label>
+                            <input type="password" id="confirmPassword" class="form-input" />
+                        </div>
+                        <button class="btn" id="updateAccountBtn">Update Account</button>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Research Preferences</h3>
+                    <div class="settings-form">
+                        <div class="form-group">
+                            <label for="primaryField">Primary Research Field Category</label>
+                            <select id="primaryField" class="form-select">
+                                <option>Computer Science</option>
+                                <option>Medicine</option>
+                                <option>Physics</option>
+                                <option>Chemistry</option>
+                                <option>Biology</option>
+                                <option>Psychology</option>
+                                <option>Economics</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="experienceLevel">Experience Level</label>
+                            <select id="experienceLevel" class="form-select">
+                                <option>Student</option>
+                                <option>Graduate Student</option>
+                                <option>PhD Student</option>
+                                <option>Postdoc</option>
+                                <option>Assistant Professor</option>
+                                <option>Associate Professor</option>
+                                <option>Professor</option>
+                                <option>Industry Researcher</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="paperLanguage">Preferred Paper Language</label>
+                            <select id="paperLanguage" class="form-select">
+                                <option>English</option>
+                                <option>Chinese</option>
+                                <option>Spanish</option>
+                                <option>Filipino</option>
+                                <option>Japanese</option>
+                            </select>
+                        </div>
+                        <button class="btn" id="savePreferencesBtn">Save Preferences</button>
+                    </div>
+                </div>
+
+                <div class="settings-section danger-zone">
+                    <h3>Danger Zone</h3>
+                    <div class="settings-actions">
+                        <button class="btn btn-danger" id="deleteAccountBtn">Delete Account</button>
+                        <p class="setting-description">Permanently delete your account and all associated data. This
+                            action cannot be undone.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase + App Script -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>

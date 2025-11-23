@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="icon.png">
+    <title>ResearchScholar - Admin Panel</title>
+
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <!-- Navbar -->
+    <header class="navbar">
+        <button class="burger-menu-btn" id="burgerMenuBtn">&#9776;</button>
+        <h1 class="navbar-title">ResearchScholar</h1>
+        <nav class="navbar-links" id="navbarLinks">
+            <a href="#" class="navbar-link" id="registerNavLink">Register</a>
+            <a href="#" class="navbar-link" id="loginNavLink">Log in</a>
+        </nav>
+    </header>
+
+    <!-- Layout -->
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="appSidebar">
+            <div class="user-profile-placeholder">
+                <span class="sidebar-avatar-text" id="sidebarAvatarInitials">U</span>
+            </div>
+            <div class="user-status" id="userStatus">Guest User</div>
+            <ul class="sidebar-navigation">
+                <li><a href="index.html" id="browsePapersLink"><i class="fas fa-search"></i> Browse Papers</a></li>
+                <li><a href="profile.html" class="is-restricted" data-feature="Profile"><i class="fas fa-user"></i>
+                        Profile</a></li>
+                <li><a href="library.html" class="is-restricted" data-feature="Library"><i class="fas fa-book"></i>
+                        Library</a></li>
+                <li><a href="published.html" class="is-restricted" data-feature="Published"><i
+                            class="fas fa-file-alt"></i> Published</a></li>
+                <li><a href="questions.html" class="is-restricted" data-feature="Questions"><i
+                            class="fas fa-question-circle"></i> Questions</a></li>
+                <li><a href="notifications.html" class="is-restricted" data-feature="Notifications"><i
+                            class="fas fa-bell"></i> Notifications</a></li>
+                <li><a href="settings.html" class="is-restricted" data-feature="Settings"><i class="fas fa-cog"></i>
+                        Settings</a></li>
+                <li><a href="about.html"><i class="fas fa-info-circle"></i> About</a></li>
+                <li><a href="admin.html" id="adminPanelLink"><i class="fas fa-shield-alt"></i> Admin Panel</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h1><i class="fas fa-shield-alt"></i> Admin Dashboard</h1>
+                <p>Manage users, oversee content, and monitor the platform</p>
+            </div>
+
+            <div id="adminAccessCheck" class="loading-state">
+                <i class="fas fa-spinner fa-spin"></i>
+                <p>Verifying admin access...</p>
+            </div>
+
+            <div id="adminDashboard" style="display:none;">
+                <div class="admin-dashboard">
+
+                    <!-- Overview Cards -->
+                    <div class="admin-overview">
+                        <div class="admin-card">
+                            <i class="fas fa-users"></i>
+                            <div>
+                                <h3>Total Users</h3>
+                                <p id="totalUsersCount">—</p>
+                            </div>
+                        </div>
+
+                        <div class="admin-card">
+                            <i class="fas fa-file-alt"></i>
+                            <div>
+                                <h3>Published Papers</h3>
+                                <p id="totalPapersCount">—</p>
+                            </div>
+                        </div>
+
+                        <div class="admin-card">
+                            <i class="fas fa-question-circle"></i>
+                            <div>
+                                <h3>Questions Posted</h3>
+                                <p id="totalQuestionsCount">—</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Management Tools -->
+                    <div class="admin-tools">
+                        <h2><i class="fas fa-toolbox"></i> Management Tools</h2>
+                        <div class="admin-tool-grid">
+                            <button class="admin-tool-btn" id="manageUsersBtn"><i class="fas fa-user-cog"></i> Manage
+                                Users</button>
+                            <button class="admin-tool-btn" id="moderateQuestionsBtn"><i class="fas fa-comments"></i>
+                                Moderate Questions</button>
+                            <button class="admin-tool-btn" id="viewAnalyticsBtn"><i class="fas fa-chart-line"></i> View
+                                Analytics</button>
+                            <button class="admin-tool-btn" id="managePapersBtn"><i class="fas fa-database"></i> Manage
+                                Papers</button>
+                        </div>
+
+                        <!-- Manage Papers Modal (large modal) -->
+                        <div id="managePapersModal" class="modal">
+                            <div class="modal-content large-modal">
+                                <button class="close-modal-btn" id="closeManagePapersModal">&times;</button>
+                                <h2 class="modal-title"><i class="fas fa-database"></i> Manage Papers (Pending Approval)
+                                </h2>
+                                <p>Review newly uploaded papers and approve or reject them.</p>
+
+                                <div style="margin: 1rem 0 0.5rem; display:flex; gap:.5rem; align-items:center;">
+                                    <input id="managePapersSearch" class="form-input"
+                                        placeholder="Search pending papers..." style="max-width:420px;">
+                                    <button class="btn" id="refreshPendingPapersBtn">Refresh</button>
+                                    <div style="margin-left:auto; color:#6b7280;">Listening for changes...</div>
+                                </div>
+
+                                <table class="admin-table" style="width:100%; margin-top:.75rem;">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width:260px;">Title</th>
+                                            <th>Authors</th>
+                                            <th>Category</th>
+                                            <th>Uploaded By</th>
+                                            <th>Uploaded At</th>
+                                            <th style="width:220px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pendingPapersBody">
+                                        <tr>
+                                            <td colspan="6">No pending papers found.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Paper Preview Modal -->
+                        <div id="paperPreviewModal" class="modal" style="display:none;">
+                            <div class="modal-content" style="max-width:800px;">
+                                <button class="close-modal-btn" id="closePaperPreview">&times;</button>
+                                <h2 id="previewPaperTitle" class="modal-title">Paper title</h2>
+
+                                <div style="text-align:left; margin-top:.5rem;">
+                                    <p><strong>Authors:</strong> <span id="previewPaperAuthors"></span></p>
+                                    <p><strong>Category:</strong> <span id="previewPaperCategory"></span></p>
+                                    <p><strong>Uploaded By:</strong> <span id="previewPaperUploader"></span></p>
+                                    <p><strong>Uploaded At:</strong> <span id="previewPaperDate"></span></p>
+                                    <div id="previewPaperTags" style="margin:.5rem 0;"></div>
+                                    <hr />
+                                    <p id="previewPaperAbstract" style="white-space:pre-line;"></p>
+                                    <div style="margin-top:1rem; display:flex; gap:.5rem; justify-content:flex-end;">
+                                        <a id="previewDownloadBtn" class="btn btn-secondary" target="_blank"
+                                            rel="noopener">View / Download</a>
+                                        <button id="previewApproveBtn" class="btn"><i class="fas fa-check"></i>
+                                            Approve</button>
+                                        <button id="previewRejectBtn" class="btn btn-danger"><i
+                                                class="fas fa-times"></i> Reject</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        </section>
+
+
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+    <!-- ✅ Manage Users Modal -->
+    <div id="manageUsersModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <button class="close-modal-btn" id="closeManageUsers">&times;</button>
+            <h2><i class="fas fa-user-cog"></i> Manage Users</h2>
+            <p>View and manage registered users</p>
+
+            <div id="usersTableContainer">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody">
+                        <tr>
+                            <td colspan="4">Loading users...</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+            </div>
+        </div>
+    </div>
+    <!-- Logout Modal -->
+    <div class="modal" id="logoutModal">
+        <div class="modal-content">
+            <button class="close-modal-btn" id="closeLogoutModal">&times;</button>
+            <div class="logout-icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+            <h2 class="modal-title">Confirm Logout</h2>
+            <p>Are you sure you want to log out of your account?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelLogout">Cancel</button>
+                <button class="btn btn-danger" id="confirmLogout">Logout</button>
+            </div>
+        </div>
+    </div>
+    <!-- Moderate Questions Modal -->
+    <div class="modal" id="moderateQuestionsModal">
+        <div class="modal-content large-modal">
+            <button class="close-modal-btn" id="closeModerateQuestions">&times;</button>
+            <h2 class="modal-title"><i class="fas fa-comments"></i> Moderate Questions</h2>
+
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Title / Content</th>
+                        <th>Author</th>
+                        <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="questionsTableBody">
+                    <tr>
+                        <td colspan="4">Loading questions...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Main app logic -->
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
