@@ -88,6 +88,8 @@ const elements = {
     registerForm: document.getElementById("registerForm"),
     googleLoginBtn: document.getElementById("googleLoginBtn"),
 
+
+
     // Search
     searchBtn: document.getElementById("searchBtn"),
     searchInput: document.getElementById("searchInput"),
@@ -100,6 +102,14 @@ const elements = {
     switchToLogin: document.getElementById("switchToLogin"),
     googleRegisterBtn: document.getElementById("googleRegisterBtn")
 };
+
+document.addEventListener("DOMContentLoaded", () => {
+    const registerForm = document.getElementById("registerForm");
+    if (registerForm) {
+        registerForm.addEventListener("submit", handleRegister);
+        console.log("✅ Register form listener attached on DOM load");
+    }
+});
 
 // Application state
 let currentUser = null;
@@ -128,7 +138,7 @@ async function checkIfUserBanned(user) {
 
     return false; // User not banned
 }
-// === UNIVERSAL ACCESS RESTRICTED MODAL ===
+// UNIVERSAL ACCESS RESTRICTED MODAL
 function showAccessRestrictedModal(message) {
     let modal = document.getElementById("accessRestrictedModal");
 
@@ -183,7 +193,7 @@ function showModal(modal) {
 
         // 🧩 Debug for register modal
         if (modal.id === "registerModal") {
-            console.log("🧩 Register modal opened, checking for form...");
+            console.log("Register modal opened, checking for form...");
             console.log("Found register form:", document.getElementById("registerForm"));
         }
     }
@@ -256,32 +266,34 @@ function attachNavLinkListeners() {
     const registerNavLink = document.getElementById("registerNavLink");
 
     if (loginNavLink) {
-        const newLoginLink = loginNavLink.cloneNode(true);
-        loginNavLink.parentNode.replaceChild(newLoginLink, loginNavLink);
+        const clone = loginNavLink.cloneNode(true);
+        loginNavLink.replaceWith(clone);
 
-        newLoginLink.addEventListener("click", (e) => {
+        clone.addEventListener("click", (e) => {
             e.preventDefault();
-            e.stopPropagation();
-            console.log("Login link clicked");
             showModal(elements.loginModal);
-            if (elements.navbarLinks) {
-                elements.navbarLinks.classList.remove("is-visible");
-            }
+            elements.navbarLinks?.classList.remove("is-visible");
         });
     }
 
     if (registerNavLink) {
-        const newRegisterLink = registerNavLink.cloneNode(true);
-        registerNavLink.parentNode.replaceChild(newRegisterLink, registerNavLink);
+        const clone = registerNavLink.cloneNode(true);
+        registerNavLink.replaceWith(clone);
 
-        newRegisterLink.addEventListener("click", (e) => {
+        clone.addEventListener("click", (e) => {
             e.preventDefault();
-            e.stopPropagation();
-            console.log("Register link clicked");
             showModal(elements.registerModal);
-            if (elements.navbarLinks) {
-                elements.navbarLinks.classList.remove("is-visible");
-            }
+
+            // Re-attach register form listener
+            setTimeout(() => {
+                const form = document.getElementById("registerForm");
+                if (form) {
+                    form.removeEventListener("submit", handleRegister);
+                    form.addEventListener("submit", handleRegister);
+                }
+            }, 50);
+
+            elements.navbarLinks?.classList.remove("is-visible");
         });
     }
 }
@@ -2902,62 +2914,53 @@ async function loadQuestionsIAnswered() {
 }
 
 async function handleQuestionUpvote(questionId) {
-    if (!firebaseAuth.currentUser) {
-        showNotification("Please log in to upvote questions.", "warning");
-        return;
-    }
-
-    const user = firebaseAuth.currentUser;
-    const questionRef = doc(firebaseDb, "questions", questionId);
-    const upvoteBtn = document.getElementById("upvoteQuestionBtn");
-
     try {
-        const questionSnap = await getDoc(questionRef);
-        if (!questionSnap.exists()) {
-            showNotification("Question not found.", "error");
+        const currentUserId = authInstance.currentUser.uid;
+
+        const questionRef = doc(firebaseDb, "questions", questionId);
+        const questionDoc = await getDoc(questionRef);
+
+        if (!questionDoc.exists()) {
+            console.error("Question does not exist.");
             return;
         }
 
-        const questionData = questionSnap.data();
-        const upvotedBy = questionData.upvotedBy || [];
-        const hasUpvoted = upvotedBy.includes(user.uid);
-        const currentUpvotes = questionData.upvotes || 0;
+        const questionData = questionDoc.data();
+        const questionAuthorId = questionData.authorId;
+        const questionTitle = questionData.title || "your question";
+        const hasUpvoted = questionData.upvotedBy?.includes(currentUserId);
 
+        // === TOGGLE UPVOTE ===
         if (hasUpvoted) {
-            // Remove user's upvote (but not below 0)
-            const newCount = Math.max(0, currentUpvotes - 1);
+            // REMOVE upvote
             await updateDoc(questionRef, {
-                upvotedBy: arrayRemove(user.uid),
-                upvotes: newCount,
-                updatedAt: new Date().toISOString()
+                upvotes: increment(-1),
+                upvotedBy: arrayRemove(currentUserId)
             });
-            showNotification("You removed your upvote.", "info");
-            if (upvoteBtn) upvoteBtn.classList.remove("active");
         } else {
-            // Add user's upvote
-            const newCount = currentUpvotes + 1;
+            // ADD upvote
             await updateDoc(questionRef, {
-                upvotedBy: arrayUnion(user.uid),
-                upvotes: newCount,
-                updatedAt: new Date().toISOString()
+                upvotes: increment(1),
+                upvotedBy: arrayUnion(currentUserId)
             });
-            showNotification("You upvoted this question!", "success");
-            if (upvoteBtn) upvoteBtn.classList.add("active");
+
+            // === SEND NOTIF TO QUESTION AUTHOR ===
+            if (currentUserId !== questionAuthorId) {
+                await createNotification(
+                    "Question Liked",
+                    `${authInstance.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
+                    questionAuthorId
+                );
+            }
         }
 
-        // Update the displayed count
-        const updatedSnap = await getDoc(questionRef);
-        const updatedData = updatedSnap.data();
-        const upvoteCountEl = document.getElementById("questionDetailUpvotes");
-        if (upvoteCountEl) {
-            upvoteCountEl.textContent = updatedData.upvotes || 0;
-        }
+        console.log("Upvote toggled successfully");
 
     } catch (error) {
         console.error("Error toggling upvote:", error);
-        showNotification("Failed to upvote. " + error.message, "error");
     }
 }
+
 
 // Attach listener in question detail view
 document.addEventListener("DOMContentLoaded", () => {
@@ -3906,6 +3909,12 @@ window.submitAnswer = async function (questionId) {
             }
         }
     }
+
+    await createNotification(
+        "New Answer",
+        `${currentUser.displayName || "Someone"} answered your question "${questionTitle}"`,
+        questionAuthorId
+    );
 };
 
 // Toggle the inline answer form inside the Question Detail view
@@ -4778,6 +4787,110 @@ function initializeNotificationsFeatures() {
     }
 }
 
+async function renderNotificationsPage() {
+    const list = document.getElementById("notificationsList");
+    if (!list) return;
+
+    const notifications = await loadUserNotifications(); // already exists
+    list.innerHTML = "";
+
+    if (notifications.length === 0) {
+        list.innerHTML = `
+            <div class="notification-item">
+                <div class="notification-content">
+                    <h4>No Notifications</h4>
+                    <p>You have no notifications yet.</p>
+                </div>
+            </div>`;
+        return;
+    }
+
+    notifications.forEach(n => {
+        const item = document.createElement("div");
+        item.className = `notification-item ${n.read ? "" : "unread"}`;
+        item.dataset.id = n.id;
+
+        const icon = getNotifIcon(n.type);
+
+        item.innerHTML = `
+            <div class="notification-icon"><span class="icon">${icon}</span></div>
+            <div class="notification-content">
+                <h4>${n.type}</h4>
+                <p>${n.message}</p>
+                <span class="notification-time">${formatTimeAgo(n.createdAt)}</span>
+            </div>
+            <div class="notification-actions">
+                <button class="btn-icon" data-action="mark">✓</button>
+                <button class="btn-icon" data-action="dismiss">×</button>
+            </div>
+        `;
+
+        list.appendChild(item);
+    });
+
+    attachNotificationActions();
+}
+
+const markAllBtn = document.querySelector(".notification-actions .btn-secondary");
+if (markAllBtn && markAllBtn.textContent.includes("Mark All as Read")) {
+    markAllBtn.addEventListener("click", async () => {
+        const notifs = await loadUserNotifications();
+        for (const n of notifs) {
+            if (!n.read) {
+                await markNotificationAsRead(n.id);
+            }
+        }
+        renderNotificationsPage();
+    });
+}
+
+function attachNotificationActions() {
+    const list = document.getElementById("notificationsList");
+    if (!list) return;
+
+    list.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".btn-icon");
+        if (!btn) return;
+
+        const item = btn.closest(".notification-item");
+        const id = item.dataset.id;
+
+        if (btn.dataset.action === "mark") {
+            await markNotificationAsRead(id);
+            item.classList.remove("unread");
+        }
+
+        if (btn.dataset.action === "dismiss") {
+            await deleteDoc(doc(firebaseDb, "notifications", id));
+            item.remove();
+        }
+    });
+}
+
+function getNotifIcon(type) {
+    const icons = {
+        "Question Liked": "👍",
+        "New Answer": "💬",
+        "Paper Approved": "📄",
+        "Paper Rejected": "❌",
+        "Info": "ℹ️"
+    };
+    return icons[type] || "🔔";
+}
+
+function formatTimeAgo(timestamp) {
+    const diff = (Date.now() - new Date(timestamp).getTime()) / 1000; // seconds
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+    return `${Math.floor(diff / 86400)} days ago`;
+}
+
+// Auto-run only on notifications page
+if (window.location.pathname.includes("notifications.html")) {
+    setTimeout(renderNotificationsPage, 300);
+}
+
 // Settings page functionality
 function initializeSettingsFeatures() {
     console.log("Initializing settings features...");
@@ -5589,8 +5702,15 @@ function initializeEventListeners() {
             hideModal(elements.loginModal);
             showModal(elements.registerModal);
 
-            // ✅ Rebind safely when modal becomes visible
-            setTimeout(() => attachRegisterFormListener(), 50);
+            // 🔥 Attach register listener AFTER modal opens
+            setTimeout(() => {
+                const form = document.getElementById("registerForm");
+                if (form) {
+                    form.removeEventListener("submit", handleRegister);
+                    form.addEventListener("submit", handleRegister);
+                    console.log("🔥 Register listener finally attached (modal visible)");
+                }
+            }, 100);
         };
     }
 
@@ -6464,9 +6584,7 @@ window.addEventListener("click", (e) => {
     let pendingPapersUnsubscribe = null;
     let currentPreviewPaper = null;
 
-    // =========================
     // UTILITY
-    // =========================
 
     function safeDate(ts) {
         if (!ts) return "—";
@@ -6640,6 +6758,12 @@ window.addEventListener("click", (e) => {
             console.error(err);
             alert("Error approving paper.");
         }
+
+        await createNotification(
+            "Paper Approved",
+            `Your paper "${paperData.title}" has been approved and published!`,
+            paperData.authorId
+        );
     }
 
 
@@ -6717,9 +6841,7 @@ window.addEventListener("click", (e) => {
         }
     }
 
-    // =========================
     // INIT
-    // =========================
 
     function init() {
         if (!managePapersBtn) return;
