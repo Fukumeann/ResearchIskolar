@@ -1678,6 +1678,41 @@ body {
     color: #5b21b6;
 }
 
+/* Upvote stat (list view) - match design of btn-upvote/active */
+.question-card-stats .upvote-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.2s ease, transform 0.12s ease;
+}
+
+.question-card-stats .upvote-stat i {
+    color: #6b7280;
+}
+
+.question-card-stats .upvote-stat.active i {
+    color: white;
+    /* keep icon visible on active background */
+}
+
+.question-card-stats .upvote-stat.active {
+    background: linear-gradient(135deg, #5b21b6, #6d28d9);
+    color: white;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+}
+
+.upvote-stat,
+.comment-stat {
+    cursor: pointer;
+}
+
+.upvote-stat:hover,
+.comment-stat:hover {
+    transform: translateY(-1px);
+}
+
 /* Question Card Actions */
 .question-card-actions {
     display: flex;

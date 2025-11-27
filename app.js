@@ -20,6 +20,7 @@ import {
     serverTimestamp,
     arrayUnion,
     arrayRemove
+    , runTransaction
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 
@@ -2781,6 +2782,12 @@ async function initializeQuestionsFeatures() {
     // Back button handler
     if (backToQuestionsBtn) {
         backToQuestionsBtn.addEventListener('click', () => {
+            // unsubscribe realtime listener if active
+            if (typeof window.questionDetailUnsubscribe === 'function') {
+                try { window.questionDetailUnsubscribe(); } catch (e) { /* ignore */ }
+                window.questionDetailUnsubscribe = null;
+            }
+
             questionDetailView.style.display = 'none';
             questionsListView.style.display = 'block';
         });
@@ -2915,7 +2922,12 @@ async function loadQuestionsIAnswered() {
 
 async function handleQuestionUpvote(questionId) {
     try {
-        const currentUserId = authInstance.currentUser.uid;
+        if (!firebaseAuth.currentUser) {
+            showNotification("Please log in to upvote.", "warning");
+            return;
+        }
+
+        const currentUserId = firebaseAuth.currentUser.uid;
 
         const questionRef = doc(firebaseDb, "questions", questionId);
         const questionDoc = await getDoc(questionRef);
@@ -2930,32 +2942,51 @@ async function handleQuestionUpvote(questionId) {
         const questionTitle = questionData.title || "your question";
         const hasUpvoted = questionData.upvotedBy?.includes(currentUserId);
 
-        // === TOGGLE UPVOTE ===
-        if (hasUpvoted) {
-            // REMOVE upvote
-            await updateDoc(questionRef, {
-                upvotes: increment(-1),
-                upvotedBy: arrayRemove(currentUserId)
-            });
-        } else {
-            // ADD upvote
-            await updateDoc(questionRef, {
-                upvotes: increment(1),
-                upvotedBy: arrayUnion(currentUserId)
-            });
+        // TOGGLE UPVOTE (safely using a transaction so upvotes never go below 0)
+        await runTransaction(firebaseDb, async (tx) => {
+            const snapshot = await tx.get(questionRef);
+            if (!snapshot.exists()) throw new Error('Question not found');
 
-            // === SEND NOTIF TO QUESTION AUTHOR ===
-            if (currentUserId !== questionAuthorId) {
-                await createNotification(
-                    "Question Liked",
-                    `${authInstance.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
-                    questionAuthorId
-                );
+            const current = snapshot.data() || {};
+            const upvotedByNow = current.upvotedBy || [];
+            const upvotesNow = typeof current.upvotes === 'number' ? current.upvotes : 0;
+            const already = upvotedByNow.includes(currentUserId);
+
+            if (already) {
+                // remove user, decrement but never go below 0
+                const nextUpvotes = Math.max(0, upvotesNow - 1);
+                const nextUpvotedBy = upvotedByNow.filter(uid => uid !== currentUserId);
+                tx.update(questionRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+            } else {
+                // add user and increment
+                const nextUpvotes = upvotesNow + 1;
+                const nextUpvotedBy = [...upvotedByNow, currentUserId];
+                tx.update(questionRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
             }
-        }
+        });
 
+        // SEND NOTIF TO QUESTION AUTHOR
+        if (currentUserId !== questionAuthorId) {
+            await createNotification(
+                "Question Liked",
+                `${firebaseAuth.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
+                questionAuthorId
+            );
+        }
         console.log("Upvote toggled successfully");
 
+        // REFRESH THE QUESTION DETAIL UI
+        if (typeof questionDetailView === "function") {
+            questionDetailView(questionId);
+        }
     } catch (error) {
         console.error("Error toggling upvote:", error);
     }
@@ -2966,7 +2997,9 @@ async function handleQuestionUpvote(questionId) {
 document.addEventListener("DOMContentLoaded", () => {
     const upvoteBtn = document.getElementById("upvoteQuestionBtn");
     if (upvoteBtn) {
-        upvoteBtn.addEventListener("click", () => {
+        upvoteBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (window.currentQuestionId) {
                 handleQuestionUpvote(window.currentQuestionId);
             } else {
@@ -2975,6 +3008,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
 
 document.addEventListener("DOMContentLoaded", () => {
     if (elements.burgerMenuBtn)
@@ -3022,14 +3056,51 @@ async function loadAndDisplayQuestions(tabType) {
     `;
 
     try {
+        // detach any previous realtime listener for the questions list
+        if (typeof window.questionsListUnsubscribe === 'function') {
+            try { window.questionsListUnsubscribe(); } catch (e) { /* ignore */ }
+            window.questionsListUnsubscribe = null;
+        }
         let questions = [];
 
         console.log(`Loading questions for tab: ${tabType}`);
 
         if (tabType === 'all') {
-            questions = await loadAllQuestions();
+            // For the main 'all' tab we subscribe to realtime updates so upvote counts update instantly
+            if (firebaseDb) {
+                const q = query(collection(firebaseDb, "questions"), orderBy("createdAt", "desc"));
+
+                // initial load + realtime updates
+                window.questionsListUnsubscribe = onSnapshot(q, (snap) => {
+                    const live = [];
+                    snap.forEach(docSnap => live.push({ id: docSnap.id, ...docSnap.data() }));
+                    console.log('Realtime questions list update — rendering', live.length);
+                    displayQuestions(live, tabType);
+                }, (err) => {
+                    console.warn('Realtime listener for questions list failed:', err);
+                });
+
+                // don't continue to getDocs fallback below; the listener will render results
+                return;
+            } else {
+                questions = await loadAllQuestions();
+            }
         } else if (tabType === 'my-questions') {
-            questions = await loadMyQuestions();
+            // For my-questions we can also subscribe if user is logged in
+            if (firebaseDb && currentUser) {
+                const q = query(collection(firebaseDb, "questions"), where("authorId", "==", currentUser.uid), orderBy("createdAt", "desc"));
+                window.questionsListUnsubscribe = onSnapshot(q, (snap) => {
+                    const live = [];
+                    snap.forEach(docSnap => live.push({ id: docSnap.id, ...docSnap.data() }));
+                    console.log('Realtime my-questions update — rendering', live.length);
+                    displayQuestions(live, tabType);
+                }, (err) => {
+                    console.warn('Realtime listener for my-questions failed:', err);
+                });
+                return;
+            } else {
+                questions = await loadMyQuestions();
+            }
         } else if (tabType === 'my-answers') {
             questions = await loadQuestionsIAnswered();
         } else if (tabType === 'unanswered') {
@@ -3310,8 +3381,13 @@ function displayQuestions(questions, tabType) {
             ` : ''}
             <div class="question-card-stats">
                 <span class="stat"><i class="fas fa-eye"></i> ${question.views || 0}</span>
-                <span class="stat"><i class="fas fa-thumbs-up"></i> ${question.upvotes || 0}</span>
-                <span class="stat"><i class="fas fa-comments"></i> <span id="answer-count-${question.id}">...</span></span>
+                ${(function () {
+                const hasUpvoted = currentUser && Array.isArray(question.upvotedBy) && question.upvotedBy.includes(currentUser.uid);
+                const icon = 'fas'; // always use solid icon to avoid missing/hidden icons
+                const activeClass = hasUpvoted ? ' active' : '';
+                return `<span class="stat upvote-stat${activeClass}" data-action="upvote" data-id="${question.id}"><i class="${icon} fa-thumbs-up"></i> <span class="upvote-count" data-id="${question.id}">${Math.max(0, question.upvotes || 0)}</span></span>`;
+            })()}
+                <span class="stat comment-stat" data-action="comments" data-id="${question.id}"><i class="fas fa-comments"></i> <span id="answer-count-${question.id}">...</span></span>
             </div>
             <div class="question-card-actions">
                 <button class="btn-small btn-primary" onclick="viewQuestionDetail('${question.id}')">
@@ -3338,6 +3414,103 @@ function displayQuestions(questions, tabType) {
             }
         });
     });
+
+    // Attach delegated click handler for upvote/comment stats (idempotent)
+    if (!questionsContainer.__stat_listener_attached) {
+        questionsContainer.addEventListener('click', async (ev) => {
+            const up = ev.target.closest('.upvote-stat');
+            const comment = ev.target.closest('.comment-stat');
+
+            if (up) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const questionId = up.dataset.id;
+
+                // Prevent clicking when no user
+                if (!currentUser) {
+                    showNotification('Please log in to upvote', 'warning');
+                    if (elements && elements.loginModal) showModal(elements.loginModal);
+                    return;
+                }
+
+                // Optimistic UI update
+                try {
+                    const countEl = up.querySelector('.upvote-count');
+                    const currentlyActive = up.classList.contains('active');
+                    let currentCount = parseInt(countEl?.textContent || '0', 10) || 0;
+
+                    if (currentlyActive) {
+                        up.classList.remove('active');
+                        const nextCount = Math.max(0, currentCount - 1);
+                        // update the inner HTML to a stable structure (keeps icon visible)
+                        up.innerHTML = `<i class="fas fa-thumbs-up"></i> <span class="upvote-count" data-id="${questionId}">${nextCount}</span>`;
+                    } else {
+                        up.classList.add('active');
+                        const nextCount = currentCount + 1;
+                        up.innerHTML = `<i class="fas fa-thumbs-up"></i> <span class="upvote-count" data-id="${questionId}">${nextCount}</span>`;
+                    }
+                } catch (_) { }
+
+                // perform DB toggle
+                try {
+                    await toggleUpvote(questionId, 'question');
+                } catch (err) {
+                    console.error('Upvote toggle failed:', err);
+                    showNotification('Failed to toggle upvote', 'error');
+                }
+                return;
+            }
+
+            if (comment) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const questionId = comment.dataset.id;
+
+                // Navigate to detail view and open the answer form (or quick answer) directly
+                try {
+                    // if user isn't logged in, ask them to login first
+                    if (!currentUser) {
+                        showNotification('Please log in to leave an answer', 'warning');
+                        if (elements && elements.loginModal) showModal(elements.loginModal);
+                        return;
+                    }
+
+                    if (typeof openQuestionDetail === 'function') {
+                        await openQuestionDetail(questionId);
+
+                        // show the inline answer form if present
+                        const answerForm = document.getElementById('answerFormContainer');
+                        const textarea = document.getElementById('answerText');
+                        if (answerForm) {
+                            answerForm.style.display = 'block';
+                            setTimeout(() => { if (textarea) textarea.focus(); }, 250);
+                        } else {
+                            // fallback to quick answer modal
+                            if (typeof showAnswerModal === 'function') showAnswerModal(questionId);
+                        }
+                    } else {
+                        viewQuestionDetail(questionId);
+                        setTimeout(() => {
+                            const answerForm = document.getElementById('answerFormContainer');
+                            const textarea = document.getElementById('answerText');
+                            if (answerForm) {
+                                answerForm.style.display = 'block';
+                                if (textarea) textarea.focus();
+                            } else if (typeof showAnswerModal === 'function') {
+                                showAnswerModal(questionId);
+                            }
+                        }, 500);
+                    }
+                } catch (err) {
+                    console.error('Failed to open question detail for comments click:', err);
+                }
+
+                return;
+            }
+        });
+
+        questionsContainer.__stat_listener_attached = true;
+    }
 }
 
 // Helper function to switch tabs programmatically
@@ -3550,25 +3723,45 @@ window.viewQuestionDetail = async function (questionId) {
         const upvoteBtn = document.getElementById("upvoteQuestionBtn");
         console.log("Upvote button element:", upvoteBtn);
 
-        el("questionDetailUpvotes").textContent = q.upvotes || 0;
+        el("questionDetailUpvotes").textContent = Math.max(0, q.upvotes || 0);
 
         if (upvoteBtn) {
             console.log("✅ Upvote button found, attaching handler");
+            // Ensure the button uses the project's upvote styling
+            upvoteBtn.classList.add('btn-upvote');
+
             // Update button appearance based on upvote status
             if (hasUpvoted) {
-                upvoteBtn.classList.add("upvoted");
-                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${q.upvotes || 0}</span>`;
+                upvoteBtn.classList.add('active');
+                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, q.upvotes || 0)}</span>`;
             } else {
-                upvoteBtn.classList.remove("upvoted");
-                upvoteBtn.innerHTML = `<i class="far fa-thumbs-up"></i> <span id="questionDetailUpvotes">${q.upvotes || 0}</span>`;
+                upvoteBtn.classList.remove('active');
+                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, q.upvotes || 0)}</span>`;
             }
 
-            // Test: Add inline onclick first
+            // Attach a click handler that applies optimistic UI updates while performing the toggle
             upvoteBtn.onclick = function (e) {
-                console.log("🎯 BUTTON CLICKED (inline)!", e);
                 e.preventDefault();
                 e.stopPropagation();
-                toggleQuestionUpvote(questionId).catch(err => console.error("Error in toggle:", err));
+
+                // optimistic toggle for snappy UI
+                try {
+                    const countEl = document.getElementById('questionDetailUpvotes');
+                    const currentCount = parseInt(countEl?.textContent || '0', 10) || 0;
+                    const currentlyActive = upvoteBtn.classList.contains('active');
+
+                    if (currentlyActive) {
+                        upvoteBtn.classList.remove('active');
+                        if (countEl) countEl.textContent = Math.max(0, currentCount - 1);
+                        upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, currentCount - 1)}</span>`;
+                    } else {
+                        upvoteBtn.classList.add('active');
+                        if (countEl) countEl.textContent = currentCount + 1;
+                        upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${currentCount + 1}</span>`;
+                    }
+                } catch (e) {/* ignore optimistic UI errors */ }
+
+                handleQuestionUpvote(questionId).catch(err => console.error("Error in toggle:", err));
                 return false;
             };
 
@@ -4244,30 +4437,94 @@ async function toggleUpvote(itemId, type = 'question') {
             return;
         }
 
-        const data = itemDoc.data();
-        const upvotedBy = data.upvotedBy || [];
-        const hasUpvoted = upvotedBy.includes(currentUser.uid);
+        // Use a transaction to safely flip the upvote and ensure upvotes never go below 0
+        await runTransaction(firebaseDb, async (tx) => {
+            const snap = await tx.get(itemRef);
+            if (!snap.exists()) throw new Error('Item not found');
+            const current = snap.data() || {};
+            const upvotedByNow = current.upvotedBy || [];
+            const upvotesNow = typeof current.upvotes === 'number' ? current.upvotes : 0;
+            const already = upvotedByNow.includes(currentUser.uid);
 
-        if (hasUpvoted) {
-            // Remove upvote
-            await updateDoc(itemRef, {
-                upvotes: increment(-1),
-                upvotedBy: upvotedBy.filter(uid => uid !== currentUser.uid),
-                updatedAt: new Date().toISOString()
-            });
-            showNotification('Upvote removed', 'info');
-        } else {
-            // Add upvote
-            await updateDoc(itemRef, {
-                upvotes: increment(1),
-                upvotedBy: [...upvotedBy, currentUser.uid],
-                updatedAt: new Date().toISOString()
-            });
-            showNotification('Upvoted!', 'success');
+            if (already) {
+                const nextUpvotes = Math.max(0, upvotesNow - 1);
+                const nextUpvotedBy = upvotedByNow.filter(uid => uid !== currentUser.uid);
+                tx.update(itemRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+                // local feedback
+                showNotification('Upvote removed', 'info');
+            } else {
+                const nextUpvotes = upvotesNow + 1;
+                const nextUpvotedBy = [...upvotedByNow, currentUser.uid];
+                tx.update(itemRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+                showNotification('Upvoted!', 'success');
+            }
+        });
+
+        // Refresh UI - try to update detailed view if present
+        try {
+            const refreshed = await getDoc(itemRef);
+            const freshData = refreshed.data() || {};
+
+            if (type === 'question') {
+                // update question detail counts if visible
+                const qUpEl = document.getElementById('questionDetailUpvotes');
+                if (qUpEl) qUpEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+                const upBtn = document.getElementById('upvoteQuestionBtn');
+                if (upBtn) {
+                    const hasUpvotedNow = (freshData.upvotedBy || []).includes(currentUser.uid);
+                    if (hasUpvotedNow) {
+                        upBtn.classList.add('btn-upvote', 'active');
+                        upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+                    } else {
+                        upBtn.classList.add('btn-upvote');
+                        upBtn.classList.remove('active');
+                        upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to refresh UI after upvote:', e);
         }
 
-        if (typeof loadQuestions === 'function') {
-            await loadQuestions();
+        // Update any visible upvote controls for this item in the DOM instead of forcing a full reload
+        try {
+            // freshData is available in the scope above; fetch again to be safe
+            const refreshedAfterTx = await getDoc(itemRef);
+            const freshData = refreshedAfterTx.data() || {};
+
+            // Update any list / card upvote controls
+            const listUpvoteEls = document.querySelectorAll(`.upvote-stat[data-id="${itemId}"]`);
+            listUpvoteEls.forEach(el => {
+                const countEl = el.querySelector('.upvote-count');
+                if (countEl) countEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+                const nowUpvoted = (freshData.upvotedBy || []).includes(currentUser.uid);
+                if (nowUpvoted) el.classList.add('active'); else el.classList.remove('active');
+            });
+
+            // Ensure the question detail button and count stay in sync if present
+            const qUpEl = document.getElementById('questionDetailUpvotes');
+            if (qUpEl) qUpEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+            const upBtn = document.getElementById('upvoteQuestionBtn');
+            if (upBtn) {
+                const hasUpvotedNow = (freshData.upvotedBy || []).includes(currentUser.uid);
+                upBtn.classList.add('btn-upvote');
+                if (hasUpvotedNow) upBtn.classList.add('active'); else upBtn.classList.remove('active');
+                upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+            }
+        } catch (e) {
+            // As a last resort, if the targeted UI update fails we avoid forcing a full page reload
+            console.warn('Failed to apply targeted UI updates after upvote:', e);
         }
 
 
@@ -5626,41 +5883,6 @@ function initializeEventListeners() {
         elements.loginForm.addEventListener("submit", handleLogin);
         console.log("Login form listener attached");
     }
-    // ✅ Robust, clean register form listener setup
-    function attachRegisterFormListener() {
-        const form = document.getElementById("registerForm");
-        if (!form) {
-            console.warn("⏳ Waiting for register form...");
-            setTimeout(attachRegisterFormListener, 300);
-            return;
-        }
-
-        console.log("✅ Register form found — listener attached");
-        form.removeEventListener("submit", handleRegister);
-        form.addEventListener("submit", handleRegister);
-    }
-    attachRegisterFormListener();
-
-    function attachLoginFormListener() {
-        const form = document.getElementById("loginForm");
-        console.log("🧩 attachLoginFormListener running, form found:", form);
-
-        // If no login form exists on this page, stop here
-        if (!form) {
-            console.info("ℹ️ Login form not found on this page — skipping listener setup.");
-            return; // <-- remove retry loop
-        }
-
-        // Prevent duplicate event listeners
-        form.removeEventListener("submit", handleLogin);
-        form.addEventListener("submit", handleLogin);
-        console.log("✅ Login form listener attached");
-    }
-
-    // Call it once when DOM is ready
-    attachLoginFormListener();
-
-
 
     if (elements.googleLoginBtn) {
         elements.googleLoginBtn.addEventListener("click", handleGoogleLogin);
@@ -5861,6 +6083,8 @@ if (document.readyState === 'loading') {
 // 📘 QUESTIONS PAGE
 if (window.location.pathname.includes("questions.html")) {
     window.currentQuestionId = null;
+    // will hold the realtime unsubscribe function for the current question detail view
+    window.questionDetailUnsubscribe = null;
 
     // --- GET ELEMENTS FROM THE PAGE ---
     const questionsListView = document.getElementById("questionsListView");
@@ -6214,11 +6438,50 @@ if (window.location.pathname.includes("questions.html")) {
             }
 
             // ✅ Upvotes
-            el("questionDetailUpvotes").textContent = q.upvotes || 0;
+            el("questionDetailUpvotes").textContent = Math.max(0, q.upvotes || 0);
 
             // ✅ Show the detail view
             questionsListView.style.display = "none";
             questionDetailView.style.display = "block";
+
+            // Attach a realtime listener for the question doc so the UI updates live (upvotes, answers count)
+            try {
+                if (typeof window.questionDetailUnsubscribe === 'function') {
+                    try { window.questionDetailUnsubscribe(); } catch (e) { /* ignore */ }
+                    window.questionDetailUnsubscribe = null;
+                }
+
+                window.questionDetailUnsubscribe = onSnapshot(qRef, (liveSnap) => {
+                    if (!liveSnap.exists()) return;
+                    const live = liveSnap.data() || {};
+
+                    // update upvotes display
+                    const upEl = document.getElementById('questionDetailUpvotes');
+                    if (upEl) upEl.textContent = Math.max(0, live.upvotes || 0);
+
+                    // update upvote button visual
+                    const upBtn = document.getElementById('upvoteQuestionBtn');
+                    if (upBtn) {
+                        upBtn.classList.add('btn-upvote');
+                        const nowUpvoted = (live.upvotedBy || []).includes(currentUser?.uid);
+                        if (nowUpvoted) {
+                            upBtn.classList.add('active');
+                            upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, live.upvotes || 0)}</span>`;
+                        } else {
+                            upBtn.classList.remove('active');
+                            upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, live.upvotes || 0)}</span>`;
+                        }
+                    }
+
+                    // update answers count if present
+                    const answersCntEl = document.getElementById('questionDetailAnswers');
+                    if (answersCntEl && typeof live.answers === 'number') answersCntEl.textContent = live.answers;
+                }, (err) => {
+                    console.warn('Realtime subscription failed for question detail:', err);
+                });
+            } catch (err) {
+                console.warn('Could not attach realtime listener to question:', err);
+            }
 
             // ✅ Load responses
             if (typeof loadQuestionResponses === "function") {
@@ -6549,9 +6812,8 @@ window.addEventListener("click", (e) => {
     }
 });
 
-// =========================
+
 // ADMIN: MANAGE PAPERS (FINAL PATCHED VERSION)
-// =========================
 
 (() => {
 
