@@ -30,6 +30,21 @@ body {
     margin-left: auto;
 }
 
+/* Small notification badge for navbar link */
+.nav-badge {
+    display: inline-block;
+    min-width: 18px;
+    height: 18px;
+    line-height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: white;
+    font-size: 0.75rem;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
 .navbar-link {
     color: white;
     text-decoration: none;
@@ -364,6 +379,37 @@ body {
     backdrop-filter: blur(2px);
 }
 
+/* Ensure any modal-like wrapper is centered on screen when visible.
+   Only target elements with the visible state to avoid leaving hidden
+   modals displayed and blocking interactions. */
+.modal.is-visible,
+.question-modal.is-visible,
+[class*="modal"].is-visible {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    background: rgba(0, 0, 0, 0.55) !important;
+    z-index: 10000 !important;
+    backdrop-filter: blur(3px) !important;
+}
+
+/* Make sure the modal content stays centered and scrollable if tall */
+.modal.is-visible .modal-content,
+.question-modal.is-visible .question-modal-content,
+.modal.is-visible .modal-content,
+.question-modal.is-visible .question-modal-content,
+.modal-content,
+.question-modal-content {
+    margin: 0 auto !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+}
+
 .modal.is-visible {
     display: flex;
     animation: fadeIn 0.3s ease;
@@ -641,6 +687,58 @@ body {
     border-top: 1px solid #e5e7eb;
 }
 
+/* Library page: use stacked results layout (match index) */
+/* Library page container should match search results width so cards feel identical */
+#papersGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    width: 100%;
+    max-width: 1100px;
+    /* match search results width */
+    margin: 0 auto;
+    /* center inside main content */
+}
+
+#papersGrid .paper-card,
+#papersGrid .search-result-item {
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+}
+
+#papersGrid .paper-card .paper-title,
+#papersGrid .search-result-item h4 {
+    font-size: 1.15rem;
+    margin-bottom: 0.4rem;
+    color: #5b21b6;
+}
+
+#papersGrid .paper-card .paper-abstract,
+#papersGrid .search-result-item .result-abstract {
+    font-size: 0.88rem;
+    max-height: 3.6rem;
+    /* ~3 lines */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    margin-bottom: 0.8rem;
+}
+
+#papersGrid .paper-card .paper-meta {
+    gap: 0.6rem;
+    font-size: 0.82rem;
+}
+
+#papersGrid .paper-actions {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+}
+
 .stats-group {
     display: flex;
     gap: 1rem;
@@ -666,6 +764,57 @@ body {
     align-items: center;
     gap: 0.75rem;
     color: #5b21b6;
+}
+
+/* File upload control styling inside forms */
+.file-upload {
+    display: block;
+    border: 2px dashed #e6e6f7;
+    padding: 0.75rem;
+    border-radius: 10px;
+    position: relative;
+    background: linear-gradient(180deg, rgba(246, 243, 255, 0.6), rgba(255, 255, 255, 0.45));
+}
+
+.file-upload input[type="file"] {
+    opacity: 0;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+}
+
+.file-upload .file-hint {
+    pointer-events: none;
+    color: #6b7280;
+    font-size: 0.9rem;
+    display: block;
+    text-align: center;
+}
+
+.file-preview {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    color: #374151;
+    font-size: 0.9rem;
+}
+
+.file-preview .file-name {
+    font-weight: 600;
+}
+
+.form-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+/* Slightly upscale submit button inside form-modal */
+.form-modal .btn-primary {
+    background: linear-gradient(90deg, #6d28d9, #8b5cf6);
+    box-shadow: 0 6px 18px rgba(91, 33, 182, 0.18);
 }
 
 .form-modal p {
@@ -1678,6 +1827,41 @@ body {
     color: #5b21b6;
 }
 
+/* Upvote stat (list view) - match design of btn-upvote/active */
+.question-card-stats .upvote-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.2s ease, transform 0.12s ease;
+}
+
+.question-card-stats .upvote-stat i {
+    color: #6b7280;
+}
+
+.question-card-stats .upvote-stat.active i {
+    color: white;
+    /* keep icon visible on active background */
+}
+
+.question-card-stats .upvote-stat.active {
+    background: linear-gradient(135deg, #5b21b6, #6d28d9);
+    color: white;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+}
+
+.upvote-stat,
+.comment-stat {
+    cursor: pointer;
+}
+
+.upvote-stat:hover,
+.comment-stat:hover {
+    transform: translateY(-1px);
+}
+
 /* Question Card Actions */
 .question-card-actions {
     display: flex;
@@ -2010,6 +2194,13 @@ body {
     gap: 1rem;
 }
 
+/* Small styling for the header/summary above the notifications list */
+#notificationsSummary {
+    font-size: 0.95rem;
+    color: #374151;
+    margin-bottom: 0.5rem;
+}
+
 .notification-item {
     background: white;
     border-radius: 12px;
@@ -2070,6 +2261,22 @@ body {
     margin-top: 2rem;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     border: 1px solid #e5e7eb;
+}
+
+/* Empty-state shown when there are no notifications */
+.notification-empty {
+    background: linear-gradient(180deg, #ffffff, #fafafa);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    border: 1px dashed #e5e7eb;
+    text-align: center;
+    color: #6b7280;
+}
+
+.notification-empty .notification-content h4 {
+    color: #374151;
+    margin-bottom: 0.25rem;
 }
 
 .notification-settings h3 {
@@ -2449,6 +2656,14 @@ textarea {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+}
+
+/* Align search results container width with library layout */
+#searchResults,
+.search-results-list {
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 .search-result-item {
@@ -3754,4 +3969,5 @@ textarea {
     border-radius: 12px;
     padding: 1.5rem;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
 }
