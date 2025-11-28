@@ -20,6 +20,7 @@ import {
     serverTimestamp,
     arrayUnion,
     arrayRemove
+    , runTransaction
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 
@@ -106,8 +107,32 @@ const elements = {
 document.addEventListener("DOMContentLoaded", () => {
     const registerForm = document.getElementById("registerForm");
     if (registerForm) {
+        // Attach submit listener (idempotent)
+        registerForm.removeEventListener("submit", handleRegister);
         registerForm.addEventListener("submit", handleRegister);
-        console.log("✅ Register form listener attached on DOM load");
+        console.log("✅ Register form submit listener attached on DOM load");
+
+        // Also attach a click listener on the submit button to handle cases
+        // where the form submit event might be intercepted or not firing.
+        const registerSubmitBtn = registerForm.querySelector('button[type="submit"]');
+        if (registerSubmitBtn) {
+            registerSubmitBtn.removeEventListener('click', registerForm._submitClickHandler);
+            const submitClickHandler = (e) => {
+                // If the form is valid, trigger the form submit which will call handleRegister
+                try {
+                    e.preventDefault();
+                } catch (_) { }
+                if (typeof registerForm.requestSubmit === 'function') {
+                    registerForm.requestSubmit();
+                } else {
+                    // Fallback: call handler directly
+                    handleRegister(new Event('submit', { bubbles: true, cancelable: true }));
+                }
+            };
+            registerForm._submitClickHandler = submitClickHandler;
+            registerSubmitBtn.addEventListener('click', submitClickHandler);
+            console.log('✅ Register submit button click listener attached');
+        }
     }
 });
 
@@ -189,6 +214,8 @@ function showAccessRestrictedModal(message) {
 function showModal(modal) {
     if (modal) {
         modal.classList.add("is-visible");
+        // ensure inline display is set so older inline-style modals show correctly
+        try { modal.style.display = 'flex'; } catch (_) { }
         document.body.style.overflow = 'hidden';
 
         // 🧩 Debug for register modal
@@ -196,12 +223,39 @@ function showModal(modal) {
             console.log("Register modal opened, checking for form...");
             console.log("Found register form:", document.getElementById("registerForm"));
         }
+        // If this is the register modal, ensure the form handler is attached
+        if (modal.id === 'registerModal') {
+            setTimeout(() => {
+                const form = document.getElementById('registerForm');
+                if (form) {
+                    form.removeEventListener('submit', handleRegister);
+                    form.addEventListener('submit', handleRegister);
+                    console.log('🔥 Register listener (re)attached by showModal');
+
+                    // Also ensure the submit button is wired (defensive)
+                    const registerSubmitBtn = form.querySelector('button[type="submit"]');
+                    if (registerSubmitBtn) {
+                        registerSubmitBtn.removeEventListener('click', form._submitClickHandler);
+                        const submitClickHandler = (e) => {
+                            try { e.preventDefault(); } catch (_) { }
+                            if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                            else handleRegister(new Event('submit', { bubbles: true, cancelable: true }));
+                        };
+                        form._submitClickHandler = submitClickHandler;
+                        registerSubmitBtn.addEventListener('click', submitClickHandler);
+                        console.log('🔥 Register submit button (re)attached by showModal');
+                    }
+                }
+            }, 50);
+        }
     }
 }
 
 function hideModal(modal) {
     if (modal) {
         modal.classList.remove("is-visible");
+        // hide any inline display left on the modal so it doesn't block interaction
+        try { modal.style.display = 'none'; } catch (_) { }
         document.body.style.overflow = '';
     }
 }
@@ -496,13 +550,10 @@ async function handleRegister(event) {
 
         showNotification("Account created successfully!", "success");
 
-        // ✅ Close modal
+        // ✅ Close modal and stay on current page (user is signed in)
         hideModal(elements.registerModal);
-
-        // ✅ Redirect immediately into app
-        setTimeout(() => {
-            window.location.href = "profile.html"; // or index.html or library.html
-        }, 500);
+        // Optionally navigate user to their profile — keep commented so user stays in context
+        // setTimeout(() => { window.location.href = "profile.html"; }, 500);
 
     } catch (error) {
         console.error("Registration error:", error);
@@ -744,6 +795,81 @@ function initializePageFeatures() {
         restoreIcons();
     }, 100);
 }
+
+// Attach delegated listeners for paper-card actions (Save/View/Remove)
+function attachPaperCardActionListeners() {
+    // Ensure we only attach once
+    if (attachPaperCardActionListeners._installed) return;
+    attachPaperCardActionListeners._installed = true;
+
+    document.addEventListener('click', async function (e) {
+        const saveBtn = e.target.closest('.btn-save-library');
+        if (saveBtn) {
+            e.preventDefault();
+            if (!currentUser) {
+                showNotification('Please log in to save papers', 'warning');
+                showModal(elements.loginModal);
+                return;
+            }
+
+            // collect metadata from data- attributes
+            const title = saveBtn.dataset.title || (saveBtn.closest('.paper-card')?.querySelector('h3, h4')?.textContent || '');
+            const authors = saveBtn.dataset.authors || '';
+            const category = saveBtn.dataset.category || '';
+            const abstract = saveBtn.dataset.abstract || '';
+            const year = saveBtn.dataset.year ? (parseInt(saveBtn.dataset.year, 10) || null) : null;
+            const url = saveBtn.dataset.url || '';
+
+            const paperData = { title, authors, category, abstract, year, url };
+
+            try {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                await addToLibrary(paperData, 'saved');
+                saveBtn.innerHTML = '<i class="fas fa-check"></i> Saved';
+                saveBtn.classList.add('saved');
+                showNotification('Paper saved to your library', 'success');
+            } catch (err) {
+                console.error('Error saving paper:', err);
+                showNotification('Failed to save paper', 'error');
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="fas fa-book"></i> Save';
+            }
+
+            return;
+        }
+
+        const removeBtn = e.target.closest('.btn-remove-library');
+        if (removeBtn) {
+            e.preventDefault();
+            if (!currentUser) {
+                showNotification('Please log in', 'warning');
+                showModal(elements.loginModal);
+                return;
+            }
+
+            // Identify the library item; prefer title+type or an id if stored
+            const title = removeBtn.dataset.title || (removeBtn.closest('.paper-card')?.querySelector('h3, h4')?.textContent || '');
+            const type = removeBtn.dataset.type || 'saved';
+
+            try {
+                if (!(await showConfirmModal('Remove this paper from your library?'))) return;
+                await removeFromLibrary(title, type);
+                const card = removeBtn.closest('.paper-card');
+                if (card) card.remove();
+                showNotification('Removed from your library', 'info');
+            } catch (err) {
+                console.error('Error removing from library:', err);
+                showNotification('Failed to remove item', 'error');
+            }
+
+            return;
+        }
+    });
+}
+
+// Ensure delegated listeners are attached
+attachPaperCardActionListeners();
 
 function initializeAllButtons() {
     const allButtons = document.querySelectorAll('.btn, .btn-small, .btn-icon, .btn-secondary, .btn-danger');
@@ -2181,6 +2307,72 @@ function initializeLibraryFeatures() {
     });
 }
 
+// Render the user's library into the library page (#papersGrid)
+async function renderUserLibrary() {
+    const container = document.getElementById('papersGrid');
+    if (!container) return;
+
+    container.innerHTML = `<div class="paper-card loading-card"><h3 class="paper-title">Loading your library...</h3></div>`;
+
+    if (!currentUser || !firebaseDb) {
+        container.innerHTML = `<div class="paper-card"><h3 class="paper-title">Please log in to view your library.</h3></div>`;
+        return;
+    }
+
+    try {
+        const papers = await loadUserLibrary('all');
+
+        if (!papers || papers.length === 0) {
+            container.innerHTML = `<div class="paper-card no-papers"><h3 class="paper-title">No saved papers in your library</h3><div class="paper-meta"><span><i class="fas fa-info-circle"></i> Use the Save button on papers to add them here.</span></div></div>`;
+            return;
+        }
+
+        const html = papers.map(paper => {
+            const viewUrl = paper.fileUrl || paper.url || '';
+            const yearText = paper.year ? `<span class="year"><i class="fas fa-calendar"></i> ${escapeHtml(String(paper.year))}</span>` : '';
+            const authorsText = escapeHtml(paper.authors || paper.authorName || '—');
+            const categoryText = escapeHtml(paper.category || '');
+            const tagsHtml = (paper.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('');
+
+            return `
+                <div class="paper-card search-result-item" data-library-id="${escapeHtml(paper.id || '')}" data-category="${escapeHtml(paper.category || '')}">
+                    <div class="result-header">
+                        <h4>${escapeHtml(paper.title || '')}</h4>
+                        <div class="result-actions">
+                            ${viewUrl ? `<a class="btn browse-btn" target="_blank" rel="noopener" href="${escapeHtml(viewUrl)}" title="View Paper"><i class="fas fa-file-pdf"></i> View Paper</a>` : ''}
+                            <button class="btn btn-remove-library" data-title="${escapeHtml(paper.title || '')}" data-type="${escapeHtml(paper.type || 'saved')}" title="Remove from library"><i class="fas fa-trash-alt"></i> Remove</button>
+                        </div>
+                    </div>
+
+                    <div class="result-meta">
+                        <span class="authors"><i class="fas fa-user"></i> ${authorsText}</span>
+                        ${yearText}
+                        <span class="category"><i class="fas fa-tag"></i> ${categoryText}</span>
+                    </div>
+
+                    <p class="result-abstract">${escapeHtml((paper.abstract || '').substring(0, 240))}${(paper.abstract && paper.abstract.length > 240) ? '...' : ''}</p>
+
+                    <div class="result-tags">${tagsHtml}</div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = html;
+
+    } catch (err) {
+        console.error('Error loading library UI:', err);
+        container.innerHTML = `<div class="paper-card"><h3 class="paper-title">Failed to load library</h3></div>`;
+    }
+}
+
+// If we are on the library page, auto-render the user library and attach refresh on auth change
+if (location.href.includes('library.html')) {
+    onAuthStateChanged(firebaseAuth, (user) => {
+        currentUser = user;
+        renderUserLibrary().catch(e => console.warn(e));
+    });
+}
+
 function filterLibraryPapers(filterValue) {
     const papers = document.querySelectorAll('.paper-card, .search-result-item');
     papers.forEach(paper => {
@@ -2345,13 +2537,15 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                 <div class="paper-card">
                     <h3 class="paper-title">${paper.title}</h3>
                     <div class="paper-meta">
-                        <span><i class="fas fa-user"></i> ${paper.authors}</span>
-                        <span><i class="fas fa-tag"></i> ${paper.category}</span>
+                        <span><i class="fas fa-user"></i> ${escapeHtml(paper.authors || paper.authorName || '—')}</span>
+                        <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
+                        ${paper.year ? `<span><i class="fas fa-calendar"></i> ${escapeHtml(String(paper.year))}</span>` : ''}
                     </div>
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${paper.url ? `<a class="btn browse-btn" target="_blank" href="${paper.url}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        ${paper.url ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(paper.url)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authors || paper.authorName || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(paper.fileUrl || paper.url || '')}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status"><i class="fas fa-clock"></i> Pending Review</span>
                     </div>
                 </div>
@@ -2376,13 +2570,15 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                 <div class="paper-card">
                     <h3 class="paper-title">${paper.title}</h3>
                     <div class="paper-meta">
-                        <span><i class="fas fa-user"></i> ${paper.authorName}</span>
-                        <span><i class="fas fa-tag"></i> ${paper.category}</span>
+                        <span><i class="fas fa-user"></i> ${escapeHtml(paper.authorName || paper.authors || '—')}</span>
+                        <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
+                        ${paper.year ? `<span><i class="fas fa-calendar"></i> ${escapeHtml(String(paper.year))}</span>` : ''}
                     </div>
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${fileUrl ? `<a class="btn browse-btn" target="_blank" href="${fileUrl}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        ${fileUrl ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(fileUrl)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authorName || paper.authors || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(fileUrl)}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status"><i class="fas fa-check-circle"></i> Published</span>
                     </div>
                 </div>
@@ -2461,6 +2657,7 @@ function initializePublishedFeatures() {
             const title = $("paperTitle").value.trim();
             const authors = $("paperAuthors").value.trim();
             const category = $("paperCategory").value;
+            const year = $("paperYear") ? parseInt($("paperYear").value, 10) || null : null;
             const abstract = $("paperAbstract").value.trim();
             const tags = $("paperTags").value.trim();
             const url = $("paperFileUrl").value.trim();
@@ -2483,6 +2680,7 @@ function initializePublishedFeatures() {
                     category,
                     abstract,
                     tags: tags ? tags.split(",").map(t => t.trim()) : [],
+                    year,
                     url,
                     authorId: user.uid,
                     submittedAt: serverTimestamp(),
@@ -2781,6 +2979,12 @@ async function initializeQuestionsFeatures() {
     // Back button handler
     if (backToQuestionsBtn) {
         backToQuestionsBtn.addEventListener('click', () => {
+            // unsubscribe realtime listener if active
+            if (typeof window.questionDetailUnsubscribe === 'function') {
+                try { window.questionDetailUnsubscribe(); } catch (e) { /* ignore */ }
+                window.questionDetailUnsubscribe = null;
+            }
+
             questionDetailView.style.display = 'none';
             questionsListView.style.display = 'block';
         });
@@ -2915,7 +3119,12 @@ async function loadQuestionsIAnswered() {
 
 async function handleQuestionUpvote(questionId) {
     try {
-        const currentUserId = authInstance.currentUser.uid;
+        if (!firebaseAuth.currentUser) {
+            showNotification("Please log in to upvote.", "warning");
+            return;
+        }
+
+        const currentUserId = firebaseAuth.currentUser.uid;
 
         const questionRef = doc(firebaseDb, "questions", questionId);
         const questionDoc = await getDoc(questionRef);
@@ -2930,32 +3139,75 @@ async function handleQuestionUpvote(questionId) {
         const questionTitle = questionData.title || "your question";
         const hasUpvoted = questionData.upvotedBy?.includes(currentUserId);
 
-        // === TOGGLE UPVOTE ===
-        if (hasUpvoted) {
-            // REMOVE upvote
-            await updateDoc(questionRef, {
-                upvotes: increment(-1),
-                upvotedBy: arrayRemove(currentUserId)
-            });
-        } else {
-            // ADD upvote
-            await updateDoc(questionRef, {
-                upvotes: increment(1),
-                upvotedBy: arrayUnion(currentUserId)
-            });
+        // TOGGLE UPVOTE (safely using a transaction so upvotes never go below 0)
+        await runTransaction(firebaseDb, async (tx) => {
+            const snapshot = await tx.get(questionRef);
+            if (!snapshot.exists()) throw new Error('Question not found');
 
-            // === SEND NOTIF TO QUESTION AUTHOR ===
-            if (currentUserId !== questionAuthorId) {
-                await createNotification(
-                    "Question Liked",
-                    `${authInstance.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
-                    questionAuthorId
-                );
+            const current = snapshot.data() || {};
+            const upvotedByNow = current.upvotedBy || [];
+            const upvotesNow = typeof current.upvotes === 'number' ? current.upvotes : 0;
+            const already = upvotedByNow.includes(currentUserId);
+
+            if (already) {
+                // remove user, decrement but never go below 0
+                const nextUpvotes = Math.max(0, upvotesNow - 1);
+                const nextUpvotedBy = upvotedByNow.filter(uid => uid !== currentUserId);
+                tx.update(questionRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+            } else {
+                // add user and increment
+                const nextUpvotes = upvotesNow + 1;
+                const nextUpvotedBy = [...upvotedByNow, currentUserId];
+                tx.update(questionRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
             }
-        }
+        });
 
+        // SEND NOTIF TO QUESTION AUTHOR ONLY WHEN UPVOTE WAS ADDED (not removed)
+        if (!hasUpvoted && currentUserId !== questionAuthorId) {
+            await createNotification(
+                "Question Liked",
+                `${firebaseAuth.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
+                questionAuthorId
+            );
+        }
         console.log("Upvote toggled successfully");
 
+        // Apply targeted DOM updates instead of forcing a full view reload
+        try {
+            const refreshed = await getDoc(doc(firebaseDb, "questions", questionId));
+            const fresh = refreshed.data() || {};
+
+            // Update list elements (cards)
+            const listEls = document.querySelectorAll(`.upvote-stat[data-id="${questionId}"]`);
+            listEls.forEach(el => {
+                const countEl = el.querySelector('.upvote-count');
+                if (countEl) countEl.textContent = Math.max(0, fresh.upvotes || 0);
+                const nowUp = (fresh.upvotedBy || []).includes(firebaseAuth.currentUser?.uid);
+                if (nowUp) el.classList.add('active'); else el.classList.remove('active');
+            });
+
+            // Update detail view elements if present
+            const qUpEl = document.getElementById('questionDetailUpvotes');
+            if (qUpEl) qUpEl.textContent = Math.max(0, fresh.upvotes || 0);
+
+            const upBtn = document.getElementById('upvoteQuestionBtn');
+            if (upBtn) {
+                const nowUp = (fresh.upvotedBy || []).includes(firebaseAuth.currentUser?.uid);
+                upBtn.classList.add('btn-upvote');
+                if (nowUp) upBtn.classList.add('active'); else upBtn.classList.remove('active');
+                upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, fresh.upvotes || 0)}</span>`;
+            }
+        } catch (e) {
+            console.warn('Failed to apply targeted UI updates after handleQuestionUpvote:', e);
+        }
     } catch (error) {
         console.error("Error toggling upvote:", error);
     }
@@ -2966,7 +3218,9 @@ async function handleQuestionUpvote(questionId) {
 document.addEventListener("DOMContentLoaded", () => {
     const upvoteBtn = document.getElementById("upvoteQuestionBtn");
     if (upvoteBtn) {
-        upvoteBtn.addEventListener("click", () => {
+        upvoteBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (window.currentQuestionId) {
                 handleQuestionUpvote(window.currentQuestionId);
             } else {
@@ -2975,6 +3229,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 });
+
 
 document.addEventListener("DOMContentLoaded", () => {
     if (elements.burgerMenuBtn)
@@ -3022,14 +3277,51 @@ async function loadAndDisplayQuestions(tabType) {
     `;
 
     try {
+        // detach any previous realtime listener for the questions list
+        if (typeof window.questionsListUnsubscribe === 'function') {
+            try { window.questionsListUnsubscribe(); } catch (e) { /* ignore */ }
+            window.questionsListUnsubscribe = null;
+        }
         let questions = [];
 
         console.log(`Loading questions for tab: ${tabType}`);
 
         if (tabType === 'all') {
-            questions = await loadAllQuestions();
+            // For the main 'all' tab we subscribe to realtime updates so upvote counts update instantly
+            if (firebaseDb) {
+                const q = query(collection(firebaseDb, "questions"), orderBy("createdAt", "desc"));
+
+                // initial load + realtime updates
+                window.questionsListUnsubscribe = onSnapshot(q, (snap) => {
+                    const live = [];
+                    snap.forEach(docSnap => live.push({ id: docSnap.id, ...docSnap.data() }));
+                    console.log('Realtime questions list update — rendering', live.length);
+                    displayQuestions(live, tabType);
+                }, (err) => {
+                    console.warn('Realtime listener for questions list failed:', err);
+                });
+
+                // don't continue to getDocs fallback below; the listener will render results
+                return;
+            } else {
+                questions = await loadAllQuestions();
+            }
         } else if (tabType === 'my-questions') {
-            questions = await loadMyQuestions();
+            // For my-questions we can also subscribe if user is logged in
+            if (firebaseDb && currentUser) {
+                const q = query(collection(firebaseDb, "questions"), where("authorId", "==", currentUser.uid), orderBy("createdAt", "desc"));
+                window.questionsListUnsubscribe = onSnapshot(q, (snap) => {
+                    const live = [];
+                    snap.forEach(docSnap => live.push({ id: docSnap.id, ...docSnap.data() }));
+                    console.log('Realtime my-questions update — rendering', live.length);
+                    displayQuestions(live, tabType);
+                }, (err) => {
+                    console.warn('Realtime listener for my-questions failed:', err);
+                });
+                return;
+            } else {
+                questions = await loadMyQuestions();
+            }
         } else if (tabType === 'my-answers') {
             questions = await loadQuestionsIAnswered();
         } else if (tabType === 'unanswered') {
@@ -3310,8 +3602,13 @@ function displayQuestions(questions, tabType) {
             ` : ''}
             <div class="question-card-stats">
                 <span class="stat"><i class="fas fa-eye"></i> ${question.views || 0}</span>
-                <span class="stat"><i class="fas fa-thumbs-up"></i> ${question.upvotes || 0}</span>
-                <span class="stat"><i class="fas fa-comments"></i> <span id="answer-count-${question.id}">...</span></span>
+                ${(function () {
+                const hasUpvoted = currentUser && Array.isArray(question.upvotedBy) && question.upvotedBy.includes(currentUser.uid);
+                const icon = 'fas'; // always use solid icon to avoid missing/hidden icons
+                const activeClass = hasUpvoted ? ' active' : '';
+                return `<span class="stat upvote-stat${activeClass}" data-action="upvote" data-id="${question.id}"><i class="${icon} fa-thumbs-up"></i> <span class="upvote-count" data-id="${question.id}">${Math.max(0, question.upvotes || 0)}</span></span>`;
+            })()}
+                <span class="stat comment-stat" data-action="comments" data-id="${question.id}"><i class="fas fa-comments"></i> <span id="answer-count-${question.id}">...</span></span>
             </div>
             <div class="question-card-actions">
                 <button class="btn-small btn-primary" onclick="viewQuestionDetail('${question.id}')">
@@ -3338,6 +3635,103 @@ function displayQuestions(questions, tabType) {
             }
         });
     });
+
+    // Attach delegated click handler for upvote/comment stats (idempotent)
+    if (!questionsContainer.__stat_listener_attached) {
+        questionsContainer.addEventListener('click', async (ev) => {
+            const up = ev.target.closest('.upvote-stat');
+            const comment = ev.target.closest('.comment-stat');
+
+            if (up) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const questionId = up.dataset.id;
+
+                // Prevent clicking when no user
+                if (!currentUser) {
+                    showNotification('Please log in to upvote', 'warning');
+                    if (elements && elements.loginModal) showModal(elements.loginModal);
+                    return;
+                }
+
+                // Optimistic UI update
+                try {
+                    const countEl = up.querySelector('.upvote-count');
+                    const currentlyActive = up.classList.contains('active');
+                    let currentCount = parseInt(countEl?.textContent || '0', 10) || 0;
+
+                    if (currentlyActive) {
+                        up.classList.remove('active');
+                        const nextCount = Math.max(0, currentCount - 1);
+                        // update the inner HTML to a stable structure (keeps icon visible)
+                        up.innerHTML = `<i class="fas fa-thumbs-up"></i> <span class="upvote-count" data-id="${questionId}">${nextCount}</span>`;
+                    } else {
+                        up.classList.add('active');
+                        const nextCount = currentCount + 1;
+                        up.innerHTML = `<i class="fas fa-thumbs-up"></i> <span class="upvote-count" data-id="${questionId}">${nextCount}</span>`;
+                    }
+                } catch (_) { }
+
+                // perform DB toggle
+                try {
+                    await toggleUpvote(questionId, 'question');
+                } catch (err) {
+                    console.error('Upvote toggle failed:', err);
+                    showNotification('Failed to toggle upvote', 'error');
+                }
+                return;
+            }
+
+            if (comment) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const questionId = comment.dataset.id;
+
+                // Navigate to detail view and open the answer form (or quick answer) directly
+                try {
+                    // if user isn't logged in, ask them to login first
+                    if (!currentUser) {
+                        showNotification('Please log in to leave an answer', 'warning');
+                        if (elements && elements.loginModal) showModal(elements.loginModal);
+                        return;
+                    }
+
+                    if (typeof openQuestionDetail === 'function') {
+                        await openQuestionDetail(questionId);
+
+                        // show the inline answer form if present
+                        const answerForm = document.getElementById('answerFormContainer');
+                        const textarea = document.getElementById('answerText');
+                        if (answerForm) {
+                            answerForm.style.display = 'block';
+                            setTimeout(() => { if (textarea) textarea.focus(); }, 250);
+                        } else {
+                            // fallback to quick answer modal
+                            if (typeof showAnswerModal === 'function') showAnswerModal(questionId);
+                        }
+                    } else {
+                        viewQuestionDetail(questionId);
+                        setTimeout(() => {
+                            const answerForm = document.getElementById('answerFormContainer');
+                            const textarea = document.getElementById('answerText');
+                            if (answerForm) {
+                                answerForm.style.display = 'block';
+                                if (textarea) textarea.focus();
+                            } else if (typeof showAnswerModal === 'function') {
+                                showAnswerModal(questionId);
+                            }
+                        }, 500);
+                    }
+                } catch (err) {
+                    console.error('Failed to open question detail for comments click:', err);
+                }
+
+                return;
+            }
+        });
+
+        questionsContainer.__stat_listener_attached = true;
+    }
 }
 
 // Helper function to switch tabs programmatically
@@ -3550,25 +3944,45 @@ window.viewQuestionDetail = async function (questionId) {
         const upvoteBtn = document.getElementById("upvoteQuestionBtn");
         console.log("Upvote button element:", upvoteBtn);
 
-        el("questionDetailUpvotes").textContent = q.upvotes || 0;
+        el("questionDetailUpvotes").textContent = Math.max(0, q.upvotes || 0);
 
         if (upvoteBtn) {
             console.log("✅ Upvote button found, attaching handler");
+            // Ensure the button uses the project's upvote styling
+            upvoteBtn.classList.add('btn-upvote');
+
             // Update button appearance based on upvote status
             if (hasUpvoted) {
-                upvoteBtn.classList.add("upvoted");
-                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${q.upvotes || 0}</span>`;
+                upvoteBtn.classList.add('active');
+                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, q.upvotes || 0)}</span>`;
             } else {
-                upvoteBtn.classList.remove("upvoted");
-                upvoteBtn.innerHTML = `<i class="far fa-thumbs-up"></i> <span id="questionDetailUpvotes">${q.upvotes || 0}</span>`;
+                upvoteBtn.classList.remove('active');
+                upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, q.upvotes || 0)}</span>`;
             }
 
-            // Test: Add inline onclick first
+            // Attach a click handler that applies optimistic UI updates while performing the toggle
             upvoteBtn.onclick = function (e) {
-                console.log("🎯 BUTTON CLICKED (inline)!", e);
                 e.preventDefault();
                 e.stopPropagation();
-                toggleQuestionUpvote(questionId).catch(err => console.error("Error in toggle:", err));
+
+                // optimistic toggle for snappy UI
+                try {
+                    const countEl = document.getElementById('questionDetailUpvotes');
+                    const currentCount = parseInt(countEl?.textContent || '0', 10) || 0;
+                    const currentlyActive = upvoteBtn.classList.contains('active');
+
+                    if (currentlyActive) {
+                        upvoteBtn.classList.remove('active');
+                        if (countEl) countEl.textContent = Math.max(0, currentCount - 1);
+                        upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, currentCount - 1)}</span>`;
+                    } else {
+                        upvoteBtn.classList.add('active');
+                        if (countEl) countEl.textContent = currentCount + 1;
+                        upvoteBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${currentCount + 1}</span>`;
+                    }
+                } catch (e) {/* ignore optimistic UI errors */ }
+
+                handleQuestionUpvote(questionId).catch(err => console.error("Error in toggle:", err));
                 return false;
             };
 
@@ -3931,25 +4345,90 @@ window.toggleAnswerForm = function () {
     }
 };
 
-window.deleteAnswer = async function (questionId, answerId) {
-    if (!confirm("Delete this answer?")) return;
+function showDeleteAnswerModal(questionId, answerId) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('deleteAnswerConfirmModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
 
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'deleteAnswerConfirmModal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <button class="close-modal-btn" type="button" id="closeDeleteAnswerModal">&times;</button>
+            <div class="modal-icon">
+                <i class="fas fa-exclamation-triangle" style="color: #dc2626;"></i>
+            </div>
+            <h2 class="modal-title">Delete Answer</h2>
+            <p>Are you sure you want to delete this answer? This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="cancelDeleteAnswer">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteAnswer">Delete</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+    setTimeout(() => modal.classList.add('is-visible'), 10);
+
+    // Close modal
+    function closeDeleteAnswerModal() {
+        modal.classList.remove('is-visible');
+        // hide immediately to avoid leftover inline `display:flex` keeping the wrapper visible
+        modal.style.display = 'none';
+        setTimeout(() => modal.remove(), 300);
+    }
+
+    // Close button
+    document.getElementById('closeDeleteAnswerModal').onclick = (e) => {
+        e.stopPropagation();
+        closeDeleteAnswerModal();
+    };
+
+    // Cancel button
+    document.getElementById('cancelDeleteAnswer').onclick = (e) => {
+        e.stopPropagation();
+        closeDeleteAnswerModal();
+    };
+
+    // Confirm delete handler
+    document.getElementById('confirmDeleteAnswer').onclick = async (e) => {
+        e.stopPropagation();
+        await confirmDeleteAnswer(questionId, answerId);
+        closeDeleteAnswerModal();
+    };
+
+    // Click outside to close
+    modal.onclick = (e) => {
+        if (e.target === modal) closeDeleteAnswerModal();
+    };
+
+    // Prevent inner clicks from closing
+    modal.querySelector('.modal-content').onclick = (e) => e.stopPropagation();
+}
+
+// Global helper so inline handlers like `onclick="deleteAnswer(qId, aId)"` work
+window.deleteAnswer = function (questionId, answerId) {
+    if (!questionId || !answerId) return;
+    showDeleteAnswerModal(questionId, answerId);
+};
+
+async function confirmDeleteAnswer(questionId, answerId) {
     try {
-        // Delete from subcollection
         await deleteDoc(doc(firebaseDb, "questions", questionId, "responses", answerId));
 
-        // Decrement answer count on parent question
         const questionRef = doc(firebaseDb, "questions", questionId);
         await updateDoc(questionRef, { answers: increment(-1) });
 
         showNotification("Answer deleted successfully!", "success");
 
-        // Refresh answers list
         if (typeof loadQuestionResponses === "function") {
             loadQuestionResponses(questionId);
         }
 
-        // Update answer count in detail view
         const detailCountEl = document.getElementById("questionDetailAnswers");
         if (detailCountEl) {
             const snap = await getDoc(questionRef);
@@ -3958,14 +4437,12 @@ window.deleteAnswer = async function (questionId, answerId) {
             }
         }
 
-        // Update the answer count in the main list view
         const listCountEl = document.getElementById(`answer-count-${questionId}`);
         if (listCountEl) {
             const newCount = await getAnswerCount(questionId);
             listCountEl.textContent = newCount;
         }
 
-        // Refresh My Answers tab if user is currently there
         if (currentTab === "my-answers" && typeof loadMyAnswers === "function") {
             loadMyAnswers();
         }
@@ -3974,7 +4451,8 @@ window.deleteAnswer = async function (questionId, answerId) {
         console.error("Error deleting answer:", error);
         showNotification("Failed to delete answer.", "error");
     }
-};
+}
+
 
 // 💬 QUICK ANSWER MODAL SYSTEM
 function answerQuestionQuick(questionId) {
@@ -4244,30 +4722,117 @@ async function toggleUpvote(itemId, type = 'question') {
             return;
         }
 
-        const data = itemDoc.data();
-        const upvotedBy = data.upvotedBy || [];
-        const hasUpvoted = upvotedBy.includes(currentUser.uid);
+        // remember prior state so we can notify only on additions
+        const priorData = itemDoc.data() || {};
+        const priorUpvoted = Array.isArray(priorData.upvotedBy) && priorData.upvotedBy.includes(currentUser.uid);
 
-        if (hasUpvoted) {
-            // Remove upvote
-            await updateDoc(itemRef, {
-                upvotes: increment(-1),
-                upvotedBy: upvotedBy.filter(uid => uid !== currentUser.uid),
-                updatedAt: new Date().toISOString()
-            });
-            showNotification('Upvote removed', 'info');
-        } else {
-            // Add upvote
-            await updateDoc(itemRef, {
-                upvotes: increment(1),
-                upvotedBy: [...upvotedBy, currentUser.uid],
-                updatedAt: new Date().toISOString()
-            });
-            showNotification('Upvoted!', 'success');
+        // Use a transaction to safely flip the upvote and ensure upvotes never go below 0
+        await runTransaction(firebaseDb, async (tx) => {
+            const snap = await tx.get(itemRef);
+            if (!snap.exists()) throw new Error('Item not found');
+            const current = snap.data() || {};
+            const upvotedByNow = current.upvotedBy || [];
+            const upvotesNow = typeof current.upvotes === 'number' ? current.upvotes : 0;
+            const already = upvotedByNow.includes(currentUser.uid);
+
+            if (already) {
+                const nextUpvotes = Math.max(0, upvotesNow - 1);
+                const nextUpvotedBy = upvotedByNow.filter(uid => uid !== currentUser.uid);
+                tx.update(itemRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+                // local feedback
+                showNotification('Upvote removed', 'info');
+            } else {
+                const nextUpvotes = upvotesNow + 1;
+                const nextUpvotedBy = [...upvotedByNow, currentUser.uid];
+                tx.update(itemRef, {
+                    upvotes: nextUpvotes,
+                    upvotedBy: nextUpvotedBy,
+                    updatedAt: new Date().toISOString()
+                });
+                showNotification('Upvoted!', 'success');
+            }
+        });
+
+        // After transaction, fetch fresh data and notify owner only if this was an add
+        try {
+            const refreshedAfterTx = await getDoc(itemRef);
+            const freshData = refreshedAfterTx.data() || {};
+            const nowUpvoted = Array.isArray(freshData.upvotedBy) && freshData.upvotedBy.includes(currentUser.uid);
+
+            // If this action resulted in an upvote (was not upvoted before, now is), notify the item's owner
+            if (!priorUpvoted && nowUpvoted) {
+                const ownerId = freshData.authorId || freshData.author || freshData.authorUid || null;
+                if (ownerId && ownerId !== currentUser.uid) {
+                    const nType = type === 'question' ? 'Question Liked' : 'Answer Liked';
+                    const nMessage = `${currentUser.displayName || currentUser.email || 'Someone'} liked your ${type}.`;
+                    await createNotification(nType, nMessage, ownerId);
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to send notification after upvote toggle:', e);
         }
 
-        if (typeof loadQuestions === 'function') {
-            await loadQuestions();
+        // Refresh UI - try to update detailed view if present
+        try {
+            const refreshed = await getDoc(itemRef);
+            const freshData = refreshed.data() || {};
+
+            if (type === 'question') {
+                // update question detail counts if visible
+                const qUpEl = document.getElementById('questionDetailUpvotes');
+                if (qUpEl) qUpEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+                const upBtn = document.getElementById('upvoteQuestionBtn');
+                if (upBtn) {
+                    const hasUpvotedNow = (freshData.upvotedBy || []).includes(currentUser.uid);
+                    if (hasUpvotedNow) {
+                        upBtn.classList.add('btn-upvote', 'active');
+                        upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+                    } else {
+                        upBtn.classList.add('btn-upvote');
+                        upBtn.classList.remove('active');
+                        upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to refresh UI after upvote:', e);
+        }
+
+        // Update any visible upvote controls for this item in the DOM instead of forcing a full reload
+        try {
+            // freshData is available in the scope above; fetch again to be safe
+            const refreshedAfterTx = await getDoc(itemRef);
+            const freshData = refreshedAfterTx.data() || {};
+
+            // Update any list / card upvote controls
+            const listUpvoteEls = document.querySelectorAll(`.upvote-stat[data-id="${itemId}"]`);
+            listUpvoteEls.forEach(el => {
+                const countEl = el.querySelector('.upvote-count');
+                if (countEl) countEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+                const nowUpvoted = (freshData.upvotedBy || []).includes(currentUser.uid);
+                if (nowUpvoted) el.classList.add('active'); else el.classList.remove('active');
+            });
+
+            // Ensure the question detail button and count stay in sync if present
+            const qUpEl = document.getElementById('questionDetailUpvotes');
+            if (qUpEl) qUpEl.textContent = Math.max(0, freshData.upvotes || 0);
+
+            const upBtn = document.getElementById('upvoteQuestionBtn');
+            if (upBtn) {
+                const hasUpvotedNow = (freshData.upvotedBy || []).includes(currentUser.uid);
+                upBtn.classList.add('btn-upvote');
+                if (hasUpvotedNow) upBtn.classList.add('active'); else upBtn.classList.remove('active');
+                upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, freshData.upvotes || 0)}</span>`;
+            }
+        } catch (e) {
+            // As a last resort, if the targeted UI update fails we avoid forcing a full page reload
+            console.warn('Failed to apply targeted UI updates after upvote:', e);
         }
 
 
@@ -4333,6 +4898,11 @@ function showAskQuestionForm() {
                         <option value="Engineering">Engineering</option>
                         <option value="Other">Other</option>
                     </select>
+
+                    <div id="questionCategoryOtherGroup" aria-hidden="true" style="display:none; margin-top:0.75rem;">
+                        <label for="questionCategoryOther" style="display:block; margin-bottom:0.25rem; font-weight:600; color:#374151;">Please specify</label>
+                        <input id="questionCategoryOther" aria-hidden="true" class="form-input" placeholder="Describe the category (e.g. Philosophy, Sociology)">
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom: 1.5rem;">
                     <label for="questionDetails" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #374151;">
@@ -4441,6 +5011,31 @@ function showAskQuestionForm() {
         };
     }
 
+    // Show/hide custom category input when 'Other' is selected
+    const categorySelectEl = document.getElementById('questionCategory');
+    const otherGroup = document.getElementById('questionCategoryOtherGroup');
+    const otherInput = document.getElementById('questionCategoryOther');
+    if (categorySelectEl && otherGroup) {
+        const toggleOther = (val) => {
+            if (val === 'Other') {
+                otherGroup.style.display = 'block';
+                otherGroup.setAttribute('aria-hidden', 'false');
+                if (otherInput) { otherInput.focus(); otherInput.setAttribute('aria-hidden', 'false'); }
+            } else {
+                otherGroup.style.display = 'none';
+                otherGroup.setAttribute('aria-hidden', 'true');
+                if (otherInput) { otherInput.value = ''; otherInput.setAttribute('aria-hidden', 'true'); }
+            }
+        };
+
+        // initialize visibility
+        toggleOther(categorySelectEl.value);
+
+        categorySelectEl.addEventListener('change', (e) => {
+            toggleOther(e.target.value);
+        });
+    }
+
     // Focus first input
     setTimeout(() => {
         const titleInput = document.getElementById('questionTitle');
@@ -4498,7 +5093,18 @@ async function submitQuestion() {
     }
 
     const title = titleInput.value.trim();
-    const category = categorySelect.value.trim();
+    let category = categorySelect.value.trim();
+    // If user selected Other, prefer the custom input value instead
+    if (category === 'Other') {
+        const otherEl = document.getElementById('questionCategoryOther');
+        const otherVal = otherEl ? otherEl.value.trim() : '';
+        if (!otherVal) {
+            showNotification('Please specify the category for "Other"', 'warning');
+            if (otherEl) otherEl.focus();
+            return;
+        }
+        category = otherVal;
+    }
     const details = detailsTextarea.value.trim();
     const tagsValue = tagsInput ? tagsInput.value.trim() : '';
 
@@ -4569,6 +5175,12 @@ async function submitQuestion() {
             // clear fields
             titleInput.value = '';
             categorySelect.selectedIndex = 0;
+            try {
+                const otherGroupEl = document.getElementById('questionCategoryOtherGroup');
+                const otherInputEl = document.getElementById('questionCategoryOther');
+                if (otherGroupEl) otherGroupEl.style.display = 'none';
+                if (otherInputEl) otherInputEl.value = '';
+            } catch (e) { /* ignore */ }
             detailsTextarea.value = '';
             if (tagsInput) tagsInput.value = '';
 
@@ -4698,6 +5310,99 @@ async function createNotification(type, message, targetUserId = null) {
     } catch (error) {
         console.error("Error creating notification:", error);
     }
+}
+
+// Ensure escapeHtml exists (fallback) so modal helpers are safe to call early
+if (typeof escapeHtml !== 'function') {
+    function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+}
+
+// Simple modal alert helper (returns a Promise resolved when user dismisses)
+function showAlertModal(message, title = 'Notice', opts = {}) {
+    return new Promise((resolve) => {
+        // remove existing alert modal
+        const existing = document.getElementById('appAlertModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'appAlertModal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <button class="close-modal-btn" type="button" id="closeAppAlert">&times;</button>
+                <div class="modal-icon"><i class="fas fa-info-circle" style="color: ${opts.color || '#5b21b6'}"></i></div>
+                <h2 class="modal-title">${escapeHtml(title)}</h2>
+                <p style="margin-top:0.5rem; white-space: pre-wrap; text-align:left;">${escapeHtml(message)}</p>
+                <div class="modal-actions">
+                    <button class="btn" id="appAlertOk">OK</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        // show modal
+        setTimeout(() => {
+            modal.style.display = 'flex';
+            modal.classList.add('is-visible');
+            document.body.style.overflow = 'hidden';
+        }, 10);
+
+        function close(result = true) {
+            modal.classList.remove('is-visible');
+            try { modal.style.display = 'none'; } catch (_) { }
+            document.body.style.overflow = '';
+            setTimeout(() => { try { modal.remove(); } catch (_) { }; resolve(result); }, 300);
+        }
+
+        modal.querySelector('#closeAppAlert').onclick = () => close(true);
+        modal.querySelector('#appAlertOk').onclick = () => close(true);
+        modal.onclick = (e) => { if (e.target === modal) close(true); };
+    });
+}
+
+// Confirm modal (returns Promise<boolean>)
+function showConfirmModal(message, title = 'Confirm') {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('appConfirmModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'appConfirmModal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <button class="close-modal-btn" type="button" id="closeAppConfirm">&times;</button>
+                <div class="modal-icon"><i class="fas fa-question-circle" style="color:#f59e0b"></i></div>
+                <h2 class="modal-title">${escapeHtml(title)}</h2>
+                <p style="margin-top:0.5rem; white-space: pre-wrap; text-align:left;">${escapeHtml(message)}</p>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="appConfirmCancel">Cancel</button>
+                    <button class="btn btn-danger" id="appConfirmOk">OK</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        setTimeout(() => { modal.style.display = 'flex'; modal.classList.add('is-visible'); document.body.style.overflow = 'hidden'; }, 10);
+
+        function close(result) {
+            modal.classList.remove('is-visible');
+            try { modal.style.display = 'none'; } catch (_) { }
+            document.body.style.overflow = '';
+            setTimeout(() => { try { modal.remove(); } catch (_) { }; resolve(result); }, 300);
+        }
+
+        modal.querySelector('#closeAppConfirm').onclick = () => close(false);
+        modal.querySelector('#appConfirmCancel').onclick = () => close(false);
+        modal.querySelector('#appConfirmOk').onclick = () => close(true);
+        modal.onclick = (e) => { if (e.target === modal) close(false); };
+    });
 }
 
 async function loadUserNotifications() {
@@ -4939,10 +5644,10 @@ function initializeSettingsFeatures() {
     // Delete account
     const deleteAccountBtn = document.getElementById('deleteAccountBtn');
     if (deleteAccountBtn) {
-        deleteAccountBtn.addEventListener('click', function () {
-            const confirmed = confirm('Are you absolutely sure you want to delete your account? This action cannot be undone.');
+        deleteAccountBtn.addEventListener('click', async function () {
+            const confirmed = await showConfirmModal('Are you absolutely sure you want to delete your account? This action cannot be undone.');
             if (confirmed) {
-                const doubleConfirmed = confirm('This will permanently delete all your data. Type "DELETE" to confirm.');
+                const doubleConfirmed = await showConfirmModal('This will permanently delete all your data. Type "DELETE" to confirm.');
                 if (doubleConfirmed) {
                     showNotification('Account deletion confirmed. This is a demo - no actual deletion occurred.', 'warning');
                     console.log('Account deletion confirmed');
@@ -4971,7 +5676,10 @@ function initializeSettingsFeatures() {
 
 async function handleSearch() {
     const query = elements.searchInput.value.trim();
+    const browseEl = document.querySelector('.browse-categories');
     if (query) {
+        // Hide the "Browse by Category" section when a search is performed
+        if (browseEl) browseEl.style.display = 'none';
         if (elements.searchBtn) {
             elements.searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
             elements.searchBtn.disabled = true;
@@ -4989,6 +5697,8 @@ async function handleSearch() {
             }
         }
     } else {
+        // If search is cleared or empty, show the browse categories again
+        if (browseEl) browseEl.style.display = '';
         showNotification("Please enter a search query", "warning");
         if (elements.searchInput) {
             elements.searchInput.focus();
@@ -5094,18 +5804,19 @@ async function performSearch(searchTerm) {
                     : ""
                 }
 
-          <div class="paper-actions">
-            ${data.url
-                    ? `<a href="${data.url}" class="btn browse-btn" target="_blank">
-                     <i class="fas fa-file-pdf"></i> View Paper
-                   </a>`
+                    <div class="paper-actions">
+                        ${data.url
+                    ? `<a href="${escapeHtml(data.url)}" class="btn browse-btn" target="_blank">
+                                         <i class="fas fa-file-pdf"></i> View Paper
+                                     </a>`
                     : ""
                 }
-            <span class="paper-status">
-                <i class="fas fa-check-circle"></i>
-                ${data.status}
-            </span>
-          </div>
+                        <button class="btn btn-save-library" data-title="${escapeHtml(data.title)}" data-authors="${escapeHtml(data.authors || '')}" data-category="${escapeHtml(data.category || '')}" data-abstract="${escapeHtml(data.abstract || '')}" data-year="${escapeHtml(data.year || '')}" data-url="${escapeHtml(data.url || '')}"><i class="fas fa-book"></i> Save</button>
+                        <span class="paper-status">
+                                <i class="fas fa-check-circle"></i>
+                                ${escapeHtml(data.status || '')}
+                        </span>
+                    </div>
         </div>
       `;
         });
@@ -5626,41 +6337,6 @@ function initializeEventListeners() {
         elements.loginForm.addEventListener("submit", handleLogin);
         console.log("Login form listener attached");
     }
-    // ✅ Robust, clean register form listener setup
-    function attachRegisterFormListener() {
-        const form = document.getElementById("registerForm");
-        if (!form) {
-            console.warn("⏳ Waiting for register form...");
-            setTimeout(attachRegisterFormListener, 300);
-            return;
-        }
-
-        console.log("✅ Register form found — listener attached");
-        form.removeEventListener("submit", handleRegister);
-        form.addEventListener("submit", handleRegister);
-    }
-    attachRegisterFormListener();
-
-    function attachLoginFormListener() {
-        const form = document.getElementById("loginForm");
-        console.log("🧩 attachLoginFormListener running, form found:", form);
-
-        // If no login form exists on this page, stop here
-        if (!form) {
-            console.info("ℹ️ Login form not found on this page — skipping listener setup.");
-            return; // <-- remove retry loop
-        }
-
-        // Prevent duplicate event listeners
-        form.removeEventListener("submit", handleLogin);
-        form.addEventListener("submit", handleLogin);
-        console.log("✅ Login form listener attached");
-    }
-
-    // Call it once when DOM is ready
-    attachLoginFormListener();
-
-
 
     if (elements.googleLoginBtn) {
         elements.googleLoginBtn.addEventListener("click", handleGoogleLogin);
@@ -5861,6 +6537,8 @@ if (document.readyState === 'loading') {
 // 📘 QUESTIONS PAGE
 if (window.location.pathname.includes("questions.html")) {
     window.currentQuestionId = null;
+    // will hold the realtime unsubscribe function for the current question detail view
+    window.questionDetailUnsubscribe = null;
 
     // --- GET ELEMENTS FROM THE PAGE ---
     const questionsListView = document.getElementById("questionsListView");
@@ -6028,17 +6706,19 @@ if (window.location.pathname.includes("questions.html")) {
                             window.deleteQuestion(id);
                         } else {
                             // fallback confirmation + delete logic (best-effort)
-                            if (confirm("Delete this question?")) {
-                                const qRef = doc(firebaseDb, "questions", id);
-                                deleteDoc(qRef).then(() => {
-                                    showNotification("Question deleted", "success");
-                                    // reload list
-                                    loadQuestions().catch(e => console.warn(e));
-                                }).catch(e => {
-                                    console.error("delete error:", e);
-                                    showNotification("Failed to delete question", "error");
-                                });
-                            }
+                            (async () => {
+                                if (await showConfirmModal("Delete this question?")) {
+                                    const qRef = doc(firebaseDb, "questions", id);
+                                    deleteDoc(qRef).then(() => {
+                                        showNotification("Question deleted", "success");
+                                        // reload list
+                                        loadQuestions().catch(e => console.warn(e));
+                                    }).catch(e => {
+                                        console.error("delete error:", e);
+                                        showNotification("Failed to delete question", "error");
+                                    });
+                                }
+                            })();
                         }
                     }
                 });
@@ -6214,11 +6894,50 @@ if (window.location.pathname.includes("questions.html")) {
             }
 
             // ✅ Upvotes
-            el("questionDetailUpvotes").textContent = q.upvotes || 0;
+            el("questionDetailUpvotes").textContent = Math.max(0, q.upvotes || 0);
 
             // ✅ Show the detail view
             questionsListView.style.display = "none";
             questionDetailView.style.display = "block";
+
+            // Attach a realtime listener for the question doc so the UI updates live (upvotes, answers count)
+            try {
+                if (typeof window.questionDetailUnsubscribe === 'function') {
+                    try { window.questionDetailUnsubscribe(); } catch (e) { /* ignore */ }
+                    window.questionDetailUnsubscribe = null;
+                }
+
+                window.questionDetailUnsubscribe = onSnapshot(qRef, (liveSnap) => {
+                    if (!liveSnap.exists()) return;
+                    const live = liveSnap.data() || {};
+
+                    // update upvotes display
+                    const upEl = document.getElementById('questionDetailUpvotes');
+                    if (upEl) upEl.textContent = Math.max(0, live.upvotes || 0);
+
+                    // update upvote button visual
+                    const upBtn = document.getElementById('upvoteQuestionBtn');
+                    if (upBtn) {
+                        upBtn.classList.add('btn-upvote');
+                        const nowUpvoted = (live.upvotedBy || []).includes(currentUser?.uid);
+                        if (nowUpvoted) {
+                            upBtn.classList.add('active');
+                            upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, live.upvotes || 0)}</span>`;
+                        } else {
+                            upBtn.classList.remove('active');
+                            upBtn.innerHTML = `<i class="fas fa-thumbs-up"></i> <span id="questionDetailUpvotes">${Math.max(0, live.upvotes || 0)}</span>`;
+                        }
+                    }
+
+                    // update answers count if present
+                    const answersCntEl = document.getElementById('questionDetailAnswers');
+                    if (answersCntEl && typeof live.answers === 'number') answersCntEl.textContent = live.answers;
+                }, (err) => {
+                    console.warn('Realtime subscription failed for question detail:', err);
+                });
+            } catch (err) {
+                console.warn('Could not attach realtime listener to question:', err);
+            }
 
             // ✅ Load responses
             if (typeof loadQuestionResponses === "function") {
@@ -6272,7 +6991,7 @@ if (window.location.pathname.includes("admin.html")) {
         const dashboard = document.getElementById("adminDashboard");
 
         if (!user) {
-            alert("You must be logged in to access the Admin Panel.");
+            await showAlertModal("You must be logged in to access the Admin Panel.");
             window.location.href = "index.html";
             return;
         }
@@ -6288,7 +7007,7 @@ if (window.location.pathname.includes("admin.html")) {
 
                 await loadAdminDashboardStats();
             } else {
-                alert("🚫 Access Denied: You are not an admin.");
+                await showAlertModal("🚫 Access Denied: You are not an admin.");
                 window.location.href = "index.html";
             }
         } catch (error) {
@@ -6388,15 +7107,15 @@ async function loadAllUsers() {
         document.querySelectorAll(".ban-btn").forEach((btn) => {
             btn.addEventListener("click", async (e) => {
                 const userId = e.target.dataset.id;
-                if (!confirm("Are you sure you want to ban this user?")) return;
+                if (!(await showConfirmModal("Are you sure you want to ban this user?"))) return;
 
                 try {
                     await updateDoc(doc(firebaseDb, "users", userId), { role: "banned" });
-                    alert("🚫 User has been banned.");
+                    await showAlertModal("🚫 User has been banned.");
                     loadAllUsers(); // refresh table
                 } catch (error) {
                     console.error("Error banning user:", error);
-                    alert("Failed to ban user. Check console for details.");
+                    await showAlertModal("Failed to ban user. Check console for details.");
                 }
             });
         });
@@ -6405,15 +7124,15 @@ async function loadAllUsers() {
         document.querySelectorAll(".unban-btn").forEach((btn) => {
             btn.addEventListener("click", async (e) => {
                 const userId = e.target.dataset.id;
-                if (!confirm("Are you sure you want to unban this user?")) return;
+                if (!(await showConfirmModal("Are you sure you want to unban this user?"))) return;
 
                 try {
                     await updateDoc(doc(firebaseDb, "users", userId), { role: "user" });
-                    alert("✅ User has been unbanned.");
+                    await showAlertModal("✅ User has been unbanned.");
                     loadAllUsers(); // refresh table
                 } catch (error) {
                     console.error("Error unbanning user:", error);
-                    alert("Failed to unban user. Check console for details.");
+                    await showAlertModal("Failed to unban user. Check console for details.");
                 }
             });
         });
@@ -6495,7 +7214,7 @@ async function loadAllQuestionsForAdmin() {
         document.querySelectorAll(".delete-question-btn").forEach((btn) => {
             btn.addEventListener("click", async (e) => {
                 const questionId = e.target.dataset.id;
-                if (confirm("Are you sure you want to delete this question and all its responses?")) {
+                if (await showConfirmModal("Are you sure you want to delete this question and all its responses?")) {
                     await deleteQuestionAsAdmin(questionId);
                 }
             });
@@ -6527,7 +7246,7 @@ async function deleteQuestionAsAdmin(questionId) {
         loadAllQuestionsForAdmin();
     } catch (error) {
         console.error("Error deleting question:", error);
-        alert("Failed to delete question.");
+        await showAlertModal("Failed to delete question.");
     }
 }
 
@@ -6549,9 +7268,8 @@ window.addEventListener("click", (e) => {
     }
 });
 
-// =========================
+
 // ADMIN: MANAGE PAPERS (FINAL PATCHED VERSION)
-// =========================
 
 (() => {
 
@@ -6712,14 +7430,14 @@ window.addEventListener("click", (e) => {
     // APPROVE / REJECT
 
     async function approvePaper(id) {
-        if (!confirm("Approve this paper?")) return;
+        if (!(await showConfirmModal("Approve this paper?"))) return;
 
         try {
             const paperRef = doc(firebaseDb, "papers", id);
             const snap = await getDoc(paperRef);
 
             if (!snap.exists()) {
-                alert("Paper not found.");
+                await showAlertModal("Paper not found.");
                 return;
             }
 
@@ -6739,6 +7457,7 @@ window.addEventListener("click", (e) => {
                 authors: paperData.authors || "",
                 category: paperData.category || "",
                 abstract: paperData.abstract || "",
+                year: paperData.year || null,
                 tags: paperData.tags || [],
                 fileUrl: paperData.fileUrl || paperData.url || "",
                 authorId: paperData.authorId || "",
@@ -6752,11 +7471,11 @@ window.addEventListener("click", (e) => {
             await deleteDoc(paperRef);
 
             closePreview();
-            alert("Paper approved and published successfully!");
+            await showAlertModal("Paper approved and published successfully!");
 
         } catch (err) {
             console.error(err);
-            alert("Error approving paper.");
+            await showAlertModal("Error approving paper.");
         }
 
         await createNotification(
@@ -6768,7 +7487,7 @@ window.addEventListener("click", (e) => {
 
 
     async function rejectPaper(id) {
-        if (!confirm("Reject this paper?")) return;
+        if (!(await showConfirmModal("Reject this paper?"))) return;
 
         try {
             const ref = doc(firebaseDb, "papers", id);
@@ -6780,11 +7499,11 @@ window.addEventListener("click", (e) => {
             // await updateDoc(ref, { status: "rejected", rejectedAt: serverTimestamp() });
 
             closePreview();
-            alert("Paper rejected and removed.");
+            await showAlertModal("Paper rejected and removed.");
 
         } catch (err) {
             console.error(err);
-            alert("Error rejecting paper.");
+            await showAlertModal("Error rejecting paper.");
         }
     }
 
@@ -6806,7 +7525,7 @@ window.addEventListener("click", (e) => {
             },
             (err) => {
                 console.error("Listener error:", err);
-                alert("Failed to listen for pending papers:\n" + err.message);
+                showAlertModal("Failed to listen for pending papers:\n" + err.message);
             }
         );
     }
@@ -6837,7 +7556,7 @@ window.addEventListener("click", (e) => {
             renderPendingPapers(docs);
         } catch (err) {
             console.error(err);
-            alert("Error refreshing papers.");
+            await showAlertModal("Error refreshing papers.");
         }
     }
 
