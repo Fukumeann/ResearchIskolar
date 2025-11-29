@@ -106,6 +106,41 @@
                                 Papers</button>
                         </div>
 
+                        <!-- Analytics Modal -->
+                        <div id="analyticsModal" class="modal">
+                            <div class="modal-content large-modal">
+                                <button class="close-modal-btn" id="closeAnalyticsModal">&times;</button>
+                                <h2 class="modal-title"><i class="fas fa-chart-line"></i> Published Papers Analytics
+                                </h2>
+                                <p>View published papers and perform administrative actions (delete Firestore records).
+                                </p>
+
+                                <div style="margin: 1rem 0 0.5rem; display:flex; gap:.5rem; align-items:center;">
+                                    <input id="analyticsSearch" class="form-input"
+                                        placeholder="Search published papers..." style="max-width:420px;">
+                                    <button class="btn" id="refreshAnalyticsBtn">Refresh</button>
+                                    <div style="margin-left:auto; color:#6b7280;">Showing latest published papers</div>
+                                </div>
+
+                                <table class="admin-table" style="width:100%; margin-top:.75rem;">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width:260px;">Title</th>
+                                            <th>Authors</th>
+                                            <th>Category</th>
+                                            <th>Published At</th>
+                                            <th style="width:160px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="analyticsPapersBody">
+                                        <tr>
+                                            <td colspan="5">Loading...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         <!-- Manage Papers Modal (large modal) -->
                         <div id="managePapersModal" class="modal">
                             <div class="modal-content large-modal">

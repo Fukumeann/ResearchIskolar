@@ -22,7 +22,7 @@ import {
     arrayRemove
     , runTransaction
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
+// Firebase Storage is not used when uploading to Cloudinary; storage SDK import removed.
 
 
 
@@ -30,22 +30,103 @@ const firebaseConfig = {
     apiKey: "AIzaSyAM8d-8hBOSf6jeR6zClVHFPU8s-o8n33Y",
     authDomain: "researchscholar-d232c.firebaseapp.com",
     projectId: "researchscholar-d232c",
-    storageBucket: "researchscholar-d232c.firebasestorage.app",
+    // NOTE: Storage bucket should usually be the `*.appspot.com` bucket name.
+    // If your Firebase console shows a different bucket, use that exact value.
+    storageBucket: "researchscholar-d232c.appspot.com",
     messagingSenderId: "140321397579",
     appId: "1:140321397579:web:966748afc14576562fa6ce",
     measurementId: "G-2SD4G9E6D3"
 };
 
+// Cloudinary client-side config (unsigned uploads)
+// Replace these values with your Cloudinary account details and the unsigned upload preset you created.
+const CLOUDINARY_CLOUD_NAME = "dekq1vljn"; // e.g. 'demo'
+const CLOUDINARY_UNSIGNED_PRESET = "researchisko"; // e.g. 'unsigned_preset'
+
+// Upload helper for Cloudinary (unsigned). Returns secure_url on success.
+async function uploadToCloudinaryUnsigned(file) {
+    if (!CLOUDINARY_CLOUD_NAME || CLOUDINARY_CLOUD_NAME === 'YOUR_CLOUD_NAME') {
+        throw new Error('Cloudinary cloud name not configured. Set CLOUDINARY_CLOUD_NAME in app.js');
+    }
+    if (!CLOUDINARY_UNSIGNED_PRESET || CLOUDINARY_UNSIGNED_PRESET === 'YOUR_UPLOAD_PRESET') {
+        throw new Error('Cloudinary unsigned preset not configured. Set CLOUDINARY_UNSIGNED_PRESET in app.js');
+    }
+
+    const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('upload_preset', CLOUDINARY_UNSIGNED_PRESET);
+
+    const resp = await fetch(url, { method: 'POST', body: form });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        const err = new Error(`Cloudinary upload failed: ${resp.status} ${resp.statusText} ${text}`);
+        err.status = resp.status;
+        throw err;
+    }
+
+    const data = await resp.json();
+    if (!data.secure_url) throw new Error('Cloudinary did not return a secure_url');
+    return data.secure_url;
+}
+
+// Admin helper: delete all documents in `publishedPapers` (use cautiously)
+async function deleteAllPublishedPapers() {
+    if (!firebaseDb) {
+        throw new Error('Firestore not initialized');
+    }
+
+    const publishedCol = collection(firebaseDb, 'publishedPapers');
+    // fetch up to 500 documents to avoid runaway loops; adjust if you have more
+    const q = query(publishedCol, orderBy('createdAt', 'desc'), limit(500));
+    const snap = await getDocs(q);
+
+    const ids = [];
+    snap.forEach(d => ids.push(d.id));
+
+    for (const id of ids) {
+        try {
+            await deleteDoc(doc(firebaseDb, 'publishedPapers', id));
+        } catch (err) {
+            console.error('Failed to delete publishedPapers/' + id, err);
+        }
+    }
+
+    return ids.length;
+}
+
+// UI-facing confirm wrapper you can call from the browser console: `deleteAllPublishedPapersConfirm()`
+async function deleteAllPublishedPapersConfirm() {
+    const ok = await showConfirmModal('This will PERMANENTLY delete up to 500 documents from the `publishedPapers` collection. Do you want to continue?');
+    if (!ok) {
+        showNotification('Deletion cancelled', 'info');
+        return 0;
+    }
+
+    try {
+        const count = await deleteAllPublishedPapers();
+        await showAlertModal(`Deleted ${count} published paper(s).`, 'Deletion Complete');
+        console.log(`Deleted ${count} published paper(s).`);
+        return count;
+    } catch (err) {
+        console.error('Error deleting published papers:', err);
+        await showAlertModal('Error while deleting published papers: ' + (err.message || err), 'Deletion Error');
+        return 0;
+    }
+}
+
+// Expose helper on window for convenience (call from DevTools)
+window.deleteAllPublishedPapersConfirm = deleteAllPublishedPapersConfirm;
+
 
 
 // Initialize Firebase
-let firebaseApp, firebaseAuth, googleProvider, firebaseDb, firebaseStorage;
+let firebaseApp, firebaseAuth, googleProvider, firebaseDb;
 
 try {
     firebaseApp = initializeApp(firebaseConfig);
     firebaseAuth = getAuth(firebaseApp);
     firebaseDb = getFirestore(firebaseApp);
-    firebaseStorage = getStorage(firebaseApp);
     googleProvider = new GoogleAuthProvider();
 
     console.log("Firebase connected:", firebaseApp.name);
@@ -878,6 +959,34 @@ function attachPaperCardActionListeners() {
     attachPaperCardActionListeners._installed = true;
 
     document.addEventListener('click', async function (e) {
+        // Handle view buttons/links (browse results & rendered cards)
+        const viewBtn = e.target.closest('.view-btn, .btn-view, .browse-btn');
+        if (viewBtn) {
+            // If it's an anchor (`a`) let it behave normally unless JS should open it.
+            const isAnchor = viewBtn.tagName === 'A' || viewBtn.tagName === 'a';
+            const fileUrl = viewBtn.dataset?.fileUrl || viewBtn.getAttribute('href') || '';
+
+            if (fileUrl && isRemoteUrl(fileUrl)) {
+                // Defensive: ensure the URL is safe and open in a new tab
+                try {
+                    const win = window.open(fileUrl, '_blank');
+                    if (win) win.focus();
+                } catch (err) {
+                    // Fallback: set location
+                    window.location.href = fileUrl;
+                }
+            } else if (fileUrl && !isRemoteUrl(fileUrl)) {
+                // URL exists but is a local path (file:// or C:\...), which browsers block.
+                showAlertModal('This paper points to a local file on your machine (file://...).\n\nBrowsers cannot open local files from a web page for security reasons.\n\nUpload the PDF to the server or Cloudinary and update the paper record with a remote URL to view it here.');
+            } else if (!isAnchor) {
+                showNotification('No file URL available for this paper', 'warning');
+            }
+
+            // Prevent other handlers from interfering for button clicks
+            e.preventDefault();
+            return;
+        }
+
         const saveBtn = e.target.closest('.btn-save-library');
         if (saveBtn) {
             e.preventDefault();
@@ -2418,7 +2527,7 @@ async function renderUserLibrary() {
                     <div class="result-header">
                         <h4>${escapeHtml(paper.title || '')}</h4>
                         <div class="result-actions">
-                            ${viewUrl ? `<a class="btn browse-btn" target="_blank" rel="noopener" href="${escapeHtml(viewUrl)}" title="View Paper"><i class="fas fa-file-pdf"></i> View Paper</a>` : ''}
+                            ${isRemoteUrl(viewUrl) ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(viewUrl)}" title="View Paper"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No accessible file"><i class="fas fa-file-pdf"></i> View</button>`}
                             <button class="btn btn-remove-library" data-title="${escapeHtml(paper.title || '')}" data-type="${escapeHtml(paper.type || 'saved')}" title="Remove from library"><i class="fas fa-trash-alt"></i> Remove</button>
                         </div>
                     </div>
@@ -2613,8 +2722,11 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                 : "";
 
             html += `
-                <div class="paper-card">
-                    <h3 class="paper-title">${paper.title}</h3>
+                <div class="paper-card" data-paper-id="${escapeHtml(paper.id || '')}" data-collection="papers">
+                    <div class="paper-header">
+                        <h3 class="paper-title">${paper.title}</h3>
+                        <span class="paper-status paper-status-pending"><i class="fas fa-clock"></i> Pending Review</span>
+                    </div>
                     <div class="paper-meta">
                         <span><i class="fas fa-user"></i> ${escapeHtml(paper.authors || paper.authorName || '—')}</span>
                         <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
@@ -2623,9 +2735,11 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${paper.url ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(paper.url)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
-                        <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authors || paper.authorName || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(paper.fileUrl || paper.url || '')}"><i class="fas fa-book"></i> Save</button>
-                        <span class="paper-status"><i class="fas fa-clock"></i> Pending Review</span>
+                        <div class="paper-actions-left">
+                            ${paper.url ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(paper.url)}"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No file"><i class="fas fa-file-pdf"></i> View</button>`}
+                            <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authors || paper.authorName || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(paper.fileUrl || paper.url || '')}"><i class="fas fa-book"></i> Save</button>
+                        </div>
+                        <button class="btn btn-danger btn-delete-paper" data-paper-id="${escapeHtml(paper.id || '')}" data-collection="papers" data-title="${escapeHtml(paper.title)}" title="Delete paper"><i class="fas fa-trash-alt"></i> Delete</button>
                     </div>
                 </div>
             `;
@@ -2636,7 +2750,6 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
     // Published Section
     // -----------------
     if (published.length > 0) {
-        html += `<h3 class="section-title">Published Papers</h3>`;
 
         published.forEach(paper => {
             const tags = paper.tags?.length
@@ -2646,8 +2759,11 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
             const fileUrl = paper.fileUrl || paper.url || "";
 
             html += `
-                <div class="paper-card">
-                    <h3 class="paper-title">${paper.title}</h3>
+                <div class="paper-card" data-paper-id="${escapeHtml(paper.id || '')}" data-collection="publishedPapers">
+                    <div class="paper-header">
+                        <h3 class="paper-title">${paper.title}</h3>
+                        <span class="paper-status paper-status-published"><i class="fas fa-check-circle"></i> Published</span>
+                    </div>
                     <div class="paper-meta">
                         <span><i class="fas fa-user"></i> ${escapeHtml(paper.authorName || paper.authors || '—')}</span>
                         <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
@@ -2656,9 +2772,11 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${fileUrl ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(fileUrl)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
-                        <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authorName || paper.authors || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(fileUrl)}"><i class="fas fa-book"></i> Save</button>
-                        <span class="paper-status"><i class="fas fa-check-circle"></i> Published</span>
+                        <div class="paper-actions-left">
+                            ${fileUrl ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(fileUrl)}"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No file"><i class="fas fa-file-pdf"></i> View</button>`}
+                            <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authorName || paper.authors || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(fileUrl)}"><i class="fas fa-book"></i> Save</button>
+                        </div>
+                        <button class="btn btn-danger btn-delete-paper" data-paper-id="${escapeHtml(paper.id || '')}" data-collection="publishedPapers" data-title="${escapeHtml(paper.title)}" title="Delete paper"><i class="fas fa-trash-alt"></i> Delete</button>
                     </div>
                 </div>
             `;
@@ -2723,67 +2841,170 @@ function initializePublishedFeatures() {
     }
 
     // =============================================================
+    // Attach delete button handlers using event delegation
+    // =============================================================
+    const container = $("myPapersContainer");
+    if (container) {
+        container.addEventListener('click', async (e) => {
+            const deleteBtn = e.target.closest('.btn-delete-paper');
+            if (!deleteBtn) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const paperId = deleteBtn.dataset.paperId;
+            const collection = deleteBtn.dataset.collection;
+            const paperTitle = deleteBtn.dataset.title || 'this paper';
+
+            if (!paperId || !collection) {
+                console.error('Missing paper ID or collection');
+                return;
+            }
+
+            // Confirm deletion
+            if (!(await showConfirmModal(`Are you sure you want to delete "${paperTitle}"? This action cannot be undone.`))) {
+                return;
+            }
+
+            try {
+                // Get paper data before deletion for notification
+                const paperRef = doc(firebaseDb, collection, paperId);
+                const paperSnap = await getDoc(paperRef);
+                const paperData = paperSnap.exists() ? paperSnap.data() : null;
+                const deletedPaperTitle = paperData?.title || paperTitle;
+
+                // Delete from the appropriate collection
+                await deleteDoc(paperRef);
+
+                // Create notification for paper deletion
+                const user = firebaseAuth?.currentUser;
+                if (user) {
+                    await createNotification(
+                        "Paper Deleted",
+                        `Your paper "${deletedPaperTitle}" has been deleted.`,
+                        user.uid
+                    );
+                }
+
+                // Show success notification
+                if (typeof showNotificationModal === "function") {
+                    showNotificationModal("Success", "Paper deleted successfully.", "success");
+                } else if (typeof showNotification === "function") {
+                    showNotification("Paper deleted successfully", "success");
+                }
+
+                // Reload the papers list
+                await loadMergedPapers();
+            } catch (err) {
+                console.error("Error deleting paper:", err);
+                if (typeof showNotificationModal === "function") {
+                    showNotificationModal("Error", "Failed to delete paper. Please try again.", "error");
+                } else if (typeof showNotification === "function") {
+                    showNotification("Failed to delete paper", "error");
+                }
+            }
+        });
+    }
+
+    // =============================================================
     // Attach submit listener DIRECTLY (no retry logic)
     // =============================================================
     const form = $("submitPaperForm");
     const modal = $("submitPaperModal");
 
+    // Track if form is currently submitting to prevent duplicate submissions
+    let isSubmitting = false;
+
     if (form) {
         form.addEventListener("submit", async (e) => {
+            // Check if delegated handler already processed (it runs first in capture phase)
+            if (window.__paperSubmitDirectHandlerProcessed) {
+                console.log("Direct handler: delegated handler already processing, skipping to avoid duplicates");
+                return;
+            }
+            
+            // Set flag to prevent delegated handler from also processing (defensive, though delegated runs first)
+            window.__paperSubmitDirectHandlerProcessed = true;
+            
             e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation(); // Prevent other handlers from running
+            
+            // Prevent duplicate submissions
+            if (isSubmitting) {
+                console.log("Form already submitting, ignoring duplicate submit");
+                window.__paperSubmitDirectHandlerProcessed = false; // Reset on early return
+                return;
+            }
+            
+            isSubmitting = true;
             console.log(">>> PUBLISH SUBMIT HANDLER TRIGGERED");
 
             const title = $("submitPaperTitle").value.trim();
             const authors = $("submitPaperAuthors").value.trim();
-            const category = $("submitPaperCategory").value;
+            let category = $("submitPaperCategory").value;
             const year = $("submitPaperYear") ? parseInt($("submitPaperYear").value, 10) || null : null;
             const abstract = $("submitPaperAbstract").value.trim();
             const tags = $("submitPaperTags").value.trim();
             const fileInput = $("submitPaperFileInput");
             const file = fileInput ? fileInput.files[0] : null;
 
+            // If user selected Other, use the custom input value instead
+            if (category === 'Other') {
+                const otherEl = $("submitPaperCategoryOther");
+                const otherVal = otherEl ? otherEl.value.trim() : '';
+                if (!otherVal) {
+                    isSubmitting = false;
+                    window.__paperSubmitDirectHandlerProcessed = false;
+                    showNotificationModal("Missing Category", "Please specify the category for 'Other'.", "error");
+                    if (otherEl) otherEl.focus();
+                    return;
+                }
+                category = otherVal;
+            }
+
             if (!title || !authors || !abstract) {
+                isSubmitting = false;
+                window.__paperSubmitDirectHandlerProcessed = false;
                 showNotificationModal("Missing Fields", "Please fill in all required fields.", "error");
                 return;
             }
 
             const user = firebaseAuth?.currentUser;
             if (!user) {
+                isSubmitting = false;
+                window.__paperSubmitDirectHandlerProcessed = false;
                 showNotificationModal("Login Required", "Please log in before submitting.", "error");
                 return;
             }
 
             try {
                 if (!file) {
+                    isSubmitting = false;
+                    window.__paperSubmitDirectHandlerProcessed = false;
                     showNotificationModal("Missing File", "Please upload your paper as a PDF file.", "error");
                     return;
                 }
                 if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+                    isSubmitting = false;
+                    window.__paperSubmitDirectHandlerProcessed = false;
                     showNotificationModal('Invalid file type', 'Please upload a PDF file.', 'error');
                     return;
                 }
                 const MAX_BYTES = 20 * 1024 * 1024; // 20MB
                 if (file.size > MAX_BYTES) {
+                    isSubmitting = false;
+                    window.__paperSubmitDirectHandlerProcessed = false;
                     showNotificationModal('File too large', 'Please upload a PDF smaller than 20MB.', 'error');
                     return;
                 }
 
-                // Upload the file to Firebase Storage
-                const storagePath = `papers/${user.uid}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-                const storageReference = storageRef(firebaseStorage, storagePath);
-
+                // Upload the file to Cloudinary (unsigned preset)
                 const originalSubmitHTML = e.submitter ? e.submitter.innerHTML : null;
                 if (e.submitter) { e.submitter.disabled = true; e.submitter.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...'; }
 
-                const downloadURL = await new Promise((resolve, reject) => {
-                    const uploadTask = uploadBytesResumable(storageReference, file);
-                    uploadTask.on('state_changed', (snapshot) => {
-                        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-                        if (e.submitter) e.submitter.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Uploading ${pct}%`;
-                    }, (err) => reject(err), async () => {
-                        try { const url = await getDownloadURL(uploadTask.snapshot.ref); resolve(url); } catch (e) { reject(e); }
-                    });
-                });
+                // Use Cloudinary unsigned upload helper (returns secure_url)
+                const downloadURL = await uploadToCloudinaryUnsigned(file);
 
                 if (e.submitter) { e.submitter.disabled = false; e.submitter.innerHTML = originalSubmitHTML || '<i class="fas fa-paper-plane"></i> Submit for Review'; }
 
@@ -2802,9 +3023,25 @@ function initializePublishedFeatures() {
                     status: "pending"
                 });
 
+                // Create notification for paper submission
+                await createNotification(
+                    "Paper Submitted",
+                    `Your paper "${title}" has been submitted and is pending review.`,
+                    user.uid
+                );
+
                 showNotificationModal("Success!", "Your paper was submitted for review.", "success");
 
                 form.reset();
+                // Hide the "Other" category field after reset
+                if (otherGroup) {
+                    otherGroup.style.display = 'none';
+                    otherGroup.setAttribute('aria-hidden', 'true');
+                }
+                if (otherInput) {
+                    otherInput.value = '';
+                    otherInput.setAttribute('aria-hidden', 'true');
+                }
                 modal.style.display = "none";
                 modal.setAttribute("aria-hidden", "true");
 
@@ -2812,8 +3049,53 @@ function initializePublishedFeatures() {
 
             } catch (err) {
                 console.error("Submission error:", err);
-                showNotificationModal("Error", "Submission failed. Please try again.", "error");
+                try {
+                    showUploadError(err);
+                } catch (e) {
+                    showNotificationModal("Error", "Submission failed. Please try again.", "error");
+                }
+                if (e.submitter) { e.submitter.disabled = false; e.submitter.innerHTML = originalSubmitHTML || '<i class="fas fa-paper-plane"></i> Submit for Review'; }
+            } finally {
+                // Reset submitting flag after a delay to allow for any async operations
+                setTimeout(() => {
+                    isSubmitting = false;
+                    window.__paperSubmitDirectHandlerProcessed = false; // Reset flag for next submission
+                }, 1000);
             }
+        });
+    }
+
+    // =============================================================
+    // Show/hide "Other" category text field
+    // =============================================================
+    const categorySelectEl = $("submitPaperCategory");
+    const otherGroup = $("submitPaperCategoryOtherGroup");
+    const otherInput = $("submitPaperCategoryOther");
+
+    if (categorySelectEl && otherGroup) {
+        const toggleOther = (val) => {
+            if (val === 'Other') {
+                otherGroup.style.display = 'block';
+                otherGroup.setAttribute('aria-hidden', 'false');
+                if (otherInput) {
+                    otherInput.focus();
+                    otherInput.setAttribute('aria-hidden', 'false');
+                }
+            } else {
+                otherGroup.style.display = 'none';
+                otherGroup.setAttribute('aria-hidden', 'true');
+                if (otherInput) {
+                    otherInput.value = '';
+                    otherInput.setAttribute('aria-hidden', 'true');
+                }
+            }
+        };
+
+        // Initialize visibility
+        toggleOther(categorySelectEl.value);
+
+        categorySelectEl.addEventListener('change', (e) => {
+            toggleOther(e.target.value);
         });
     }
 
@@ -2829,6 +3111,15 @@ function initializePublishedFeatures() {
         modal.style.display = "none";
         modal.setAttribute("aria-hidden", "true");
         form.reset();
+        // Hide the "Other" category field after reset
+        if (otherGroup) {
+            otherGroup.style.display = 'none';
+            otherGroup.setAttribute('aria-hidden', 'true');
+        }
+        if (otherInput) {
+            otherInput.value = '';
+            otherInput.setAttribute('aria-hidden', 'true');
+        }
     };
 
     $("closeSubmitPaperModal")?.addEventListener("click", closeModal);
@@ -2890,9 +3181,18 @@ function initializePublishedFeatures() {
         const form = e.target;
         if (!form || form.id !== 'submitPaperForm') return;
 
+        // Since we run in capture phase (before direct handler), set flag first to prevent direct handler from running
+        if (window.__paperSubmitDirectHandlerProcessed) {
+            console.log("Delegated handler: already processing, skipping duplicate");
+            return;
+        }
+        
+        // Set flag IMMEDIATELY to prevent direct handler from also processing
+        window.__paperSubmitDirectHandlerProcessed = true;
+
         e.preventDefault();
         e.stopImmediatePropagation();
-        console.log("Delegated handler: caught submit for #submitPaperForm");
+        console.log("Delegated handler: caught submit for #submitPaperForm (fallback)");
 
         // Defensive reads
         const get = id => document.getElementById(id);
@@ -2906,10 +3206,23 @@ function initializePublishedFeatures() {
 
         const title = titleEl?.value?.trim?.() ?? '';
         const authors = authorsEl?.value?.trim?.() ?? '';
-        const category = categoryEl?.value ?? '';
+        let category = categoryEl?.value ?? '';
         const abstract = abstractEl?.value?.trim?.() ?? '';
         const tags = tagsEl?.value?.trim?.() ?? '';
         const file = fileInputEl?.files?.[0] ?? null;
+
+        // If user selected Other, use the custom input value instead
+        if (category === 'Other') {
+            const otherEl = get('submitPaperCategoryOther');
+            const otherVal = otherEl?.value?.trim?.() ?? '';
+            if (!otherVal) {
+                console.warn("Delegated handler: missing other category value");
+                if (typeof showNotificationModal === "function") showNotificationModal("Missing Category", "Please specify the category for 'Other'.", "error");
+                if (otherEl) otherEl.focus();
+                return;
+            }
+            category = otherVal;
+        }
 
         console.log("Delegated submit values:", { title, authors, category, abstract, tags });
 
@@ -2937,15 +3250,8 @@ function initializePublishedFeatures() {
                 return;
             }
 
-            const storagePath = `papers/${user.uid}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-            const storageReference = storageRef(firebaseStorage, storagePath);
-
-            const downloadURL = await new Promise((resolve, reject) => {
-                const uploadTask = uploadBytesResumable(storageReference, file);
-                uploadTask.on('state_changed', null, (err) => reject(err), async () => {
-                    try { resolve(await getDownloadURL(uploadTask.snapshot.ref)); } catch (e) { reject(e); }
-                });
-            });
+            // Upload to Cloudinary unsigned (client-side)
+            const downloadURL = await uploadToCloudinaryUnsigned(file);
 
             console.log("Delegated handler: submitting to Firestore...");
             await addDoc(collection(firebaseDb, "papers"), {
@@ -2962,6 +3268,19 @@ function initializePublishedFeatures() {
             });
 
             console.log("Delegated handler: submission success");
+            
+            // Only create notification if direct handler didn't already process (to avoid duplicates)
+            // The direct handler already creates the notification, so we skip it here
+            // Note: This handler only runs if direct handler didn't process, so we should create notification
+            // But to be safe, we check the flag anyway
+            if (!window.__paperSubmitDirectHandlerProcessed) {
+                await createNotification(
+                    "Paper Submitted",
+                    `Your paper "${title}" has been submitted and is pending review.`,
+                    user.uid
+                );
+            }
+            
             if (typeof showNotificationModal === "function") showNotificationModal("Success!", "Your paper was submitted for review.", "success");
             // reset form and close modal if present
             form.reset();
@@ -2973,7 +3292,16 @@ function initializePublishedFeatures() {
             if (typeof loadMergedPapers === "function") setTimeout(loadMergedPapers, 400);
         } catch (err) {
             console.error("Delegated handler: submission error", err);
-            if (typeof showNotificationModal === "function") showNotificationModal("Error", "Submission failed. Try again.", "error");
+            try {
+                showUploadError(err);
+            } catch (e) {
+                if (typeof showNotificationModal === "function") showNotificationModal("Error", "Submission failed. Try again.", "error");
+            }
+        } finally {
+            // Reset flag after completion
+            setTimeout(() => {
+                window.__paperSubmitDirectHandlerProcessed = false;
+            }, 1000);
         }
     }, true /* useCapture to catch earlier */);
 
@@ -3010,6 +3338,21 @@ function initializePublishedFeatures() {
 
 
 
+// Track if notification modal is currently showing to prevent duplicates
+let notificationModalShowing = false;
+
+// Global function to close notification modal (for inline handlers and error cases)
+window.closeNotification = function() {
+    const modal = document.getElementById("notificationModal");
+    if (modal) {
+        notificationModalShowing = false;
+        modal.classList.remove("is-visible");
+        modal.setAttribute("aria-hidden", "true");
+        modal.style.display = "none";
+        document.body.style.overflow = "";
+    }
+};
+
 function showNotificationModal(title, message, type = "info") {
     const modal = document.getElementById("notificationModal");
     const titleEl = document.getElementById("notificationTitle");
@@ -3019,30 +3362,77 @@ function showNotificationModal(title, message, type = "info") {
 
     if (!modal || !titleEl || !messageEl) return;
 
+    // Prevent duplicate modals
+    if (notificationModalShowing) {
+        console.log("Notification modal already showing, skipping duplicate");
+        return;
+    }
+
+    notificationModalShowing = true;
+
     titleEl.textContent = title;
     messageEl.textContent = message;
 
     // Change color based on type
-    modalContent.style.borderTop = type === "success"
-        ? "6px solid #10b981"
-        : type === "error"
-            ? "6px solid #dc2626"
-            : "6px solid #5b21b6";
+    if (modalContent) {
+        modalContent.style.borderTop = type === "success"
+            ? "6px solid #10b981"
+            : type === "error"
+                ? "6px solid #dc2626"
+                : "6px solid #5b21b6";
+    }
 
+    modal.style.display = "flex";
     modal.classList.add("is-visible");
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
 
     const closeModal = () => {
+        notificationModalShowing = false;
         modal.classList.remove("is-visible");
         modal.setAttribute("aria-hidden", "true");
+        modal.style.display = "none";
         document.body.style.overflow = "";
     };
 
-    closeBtn.onclick = closeModal;
-    modal.onclick = (e) => {
-        if (e.target === modal) closeModal();
+    // Remove any existing inline onclick handlers and set new one
+    if (closeBtn) {
+        // Remove any existing onclick attribute
+        closeBtn.removeAttribute("onclick");
+        // Remove any existing event listeners by cloning and replacing
+        const newCloseBtn = closeBtn.cloneNode(true);
+        closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+        
+        // Set up new event listener
+        newCloseBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeModal();
+        });
+    }
+
+    // Remove any existing click handlers on modal and set new one
+    const newModalClickHandler = (e) => {
+        if (e.target === modal) {
+            closeModal();
+        }
     };
+    // Remove old handler if exists
+    if (modal._notificationClickHandler) {
+        modal.removeEventListener("click", modal._notificationClickHandler);
+    }
+    modal._notificationClickHandler = newModalClickHandler;
+    modal.addEventListener("click", newModalClickHandler);
+}
+
+// Show a more detailed upload error to help diagnose CORS/auth issues
+function showUploadError(err) {
+    console.error('Storage upload error detail:', err);
+    const details = err && (err.message || err.code) ? `${err.code || ''} ${err.message || ''}`.trim() : String(err);
+    const hint = 'Possible causes: CORS not configured on the Storage bucket, incorrect bucket name, or authentication/permission issues.';
+    const advice = 'Check DevTools Network panel for the OPTIONS preflight response and run the gsutil `cors get`/`set` steps.';
+    const message = details ? `${details} — ${hint} ${advice}` : `${hint} ${advice}`;
+    showNotificationModal('Upload Error', message, 'error');
 }
 
 
@@ -4571,10 +4961,24 @@ window.deleteAnswer = function (questionId, answerId) {
 
 async function confirmDeleteAnswer(questionId, answerId) {
     try {
-        await deleteDoc(doc(firebaseDb, "questions", questionId, "responses", answerId));
+        // Get answer data before deletion for notification
+        const answerRef = doc(firebaseDb, "questions", questionId, "responses", answerId);
+        const answerSnap = await getDoc(answerRef);
+        const answerData = answerSnap.exists() ? answerSnap.data() : null;
+
+        await deleteDoc(answerRef);
 
         const questionRef = doc(firebaseDb, "questions", questionId);
         await updateDoc(questionRef, { answers: increment(-1) });
+
+        // Create notification for answer deletion
+        if (answerData && answerData.authorId) {
+            await createNotification(
+                "Answer Deleted",
+                `Your answer has been deleted.`,
+                answerData.authorId
+            );
+        }
 
         showNotification("Answer deleted successfully!", "success");
 
@@ -5317,6 +5721,13 @@ async function submitQuestion() {
         const docRef = await addDoc(questionsRef, questionData);
         console.log('✅ SUCCESS! Question posted with ID:', docRef.id);
 
+        // Create notification for question submission
+        await createNotification(
+            "Question Posted",
+            `Your question "${title}" has been posted successfully.`,
+            currentUser.uid
+        );
+
         submitBtn.innerHTML = '<i class="fas fa-check"></i> Posted!';
         submitBtn.style.background = '#10b981';
         showNotification('Question posted successfully! 🎉', 'success');
@@ -5479,6 +5890,16 @@ if (typeof escapeHtml !== 'function') {
     }
 }
 
+// Helper to determine whether a URL is a safe remote resource we can open from the browser
+function isRemoteUrl(url) {
+    if (!url) return false;
+    try {
+        return /^(https?:|blob:|data:)/i.test(String(url).trim());
+    } catch (e) {
+        return false;
+    }
+}
+
 // Simple modal alert helper (returns a Promise resolved when user dismisses)
 function showAlertModal(message, title = 'Notice', opts = {}) {
     return new Promise((resolve) => {
@@ -5636,87 +6057,98 @@ async function markNotificationAsRead(notificationId) {
 }
 
 // Notifications page functionality
+let currentNotificationFilter = 'All';
+let allNotifications = [];
+
 function initializeNotificationsFeatures() {
+    // Filter tabs functionality
     const notifTabBtns = document.querySelectorAll('.notification-controls .tab-btn');
     notifTabBtns.forEach(btn => {
         btn.addEventListener('click', function () {
             notifTabBtns.forEach(tab => tab.classList.remove('active'));
             this.classList.add('active');
-            console.log(`Switched to notification tab: ${this.textContent}`);
+            currentNotificationFilter = this.textContent.trim();
+            filterAndRenderNotifications();
         });
     });
 
-    const markReadBtns = document.querySelectorAll('.notification-actions .btn-icon[title="Mark as read"]');
-    markReadBtns.forEach(btn => {
-        btn.addEventListener('click', function () {
-            const notification = this.closest('.notification-item');
-            if (notification) {
-                notification.classList.remove('unread');
-                this.style.display = 'none';
-                console.log('Notification marked as read');
-            }
-        });
-    });
-
-    const dismissBtns = document.querySelectorAll('.notification-actions .btn-icon[title="Dismiss"]');
-    dismissBtns.forEach(btn => {
-        btn.addEventListener('click', function () {
-            const notification = this.closest('.notification-item');
-            if (notification) {
-                notification.style.opacity = '0';
-                notification.style.transform = 'translateX(100%)';
-                setTimeout(() => {
-                    notification.remove();
-                }, 300);
-                console.log('Notification dismissed');
-            }
-        });
-    });
-
+    // Mark All as Read button
     const markAllReadBtn = document.querySelector('.notification-actions .btn-secondary');
     if (markAllReadBtn && markAllReadBtn.textContent.includes('Mark All as Read')) {
-        markAllReadBtn.addEventListener('click', function () {
-            const unreadNotifications = document.querySelectorAll('.notification-item.unread');
-            unreadNotifications.forEach(notification => {
-                notification.classList.remove('unread');
-            });
-            console.log('All notifications marked as read');
+        markAllReadBtn.addEventListener('click', async function () {
+            const unreadNotifications = allNotifications.filter(n => !n.read);
+            if (unreadNotifications.length === 0) {
+                if (typeof showNotification === "function") {
+                    showNotification("All notifications are already read", "info");
+                }
+                return;
+            }
+
+            try {
+                for (const notif of unreadNotifications) {
+                    await markNotificationAsRead(notif.id);
+                }
+                if (typeof showNotification === "function") {
+                    showNotification(`Marked ${unreadNotifications.length} notification(s) as read`, "success");
+                }
+                await renderNotificationsPage();
+            } catch (err) {
+                console.error("Error marking all as read:", err);
+                if (typeof showNotification === "function") {
+                    showNotification("Failed to mark all as read", "error");
+                }
+            }
         });
     }
 }
 
-async function renderNotificationsPage() {
+function filterAndRenderNotifications() {
     const list = document.getElementById("notificationsList");
     if (!list) return;
 
-    const notifications = await loadUserNotifications(); // already exists
-    list.innerHTML = "";
+    let filtered = [...allNotifications];
 
-    const unreadCount = notifications.filter(n => !n.read).length;
-    // show header summary at top of notifications list — hide header when there are no notifications
-    const header = document.getElementById('notificationsSummary');
-    if (header) {
-        if (notifications.length === 0) {
-            header.style.display = 'none';
-        } else {
-            header.style.display = '';
-            header.textContent = `You have ${notifications.length} notifications (${unreadCount} unread)`;
-        }
+    // Apply filter
+    switch (currentNotificationFilter) {
+        case 'Unread':
+            filtered = filtered.filter(n => !n.read);
+            break;
+        case 'Papers':
+            filtered = filtered.filter(n =>
+                n.type && (n.type.includes('Paper') || n.type.includes('paper'))
+            );
+            break;
+        case 'Questions':
+            filtered = filtered.filter(n =>
+                n.type && (n.type.includes('Question') || n.type.includes('question'))
+            );
+            break;
+        case 'Answers':
+            filtered = filtered.filter(n =>
+                n.type && (n.type.includes('Answer') || n.type.includes('answer'))
+            );
+            break;
+        case 'All':
+        default:
+            // Show all
+            break;
     }
 
-    if (notifications.length === 0) {
-        // Render a single, clear empty-state so we never show multiple "No notifications" copies.
+    // Clear and render filtered notifications
+    list.innerHTML = "";
+
+    if (filtered.length === 0) {
         list.innerHTML = `
             <div class="notification-empty">
                 <div class="notification-content">
-                    <h4>No notifications yet</h4>
-                    <p>You're all caught up — no new notifications.</p>
+                    <h4>No ${currentNotificationFilter.toLowerCase()} notifications</h4>
+                    <p>You're all caught up — no ${currentNotificationFilter.toLowerCase()} notifications.</p>
                 </div>
             </div>`;
         return;
     }
 
-    notifications.forEach(n => {
+    filtered.forEach(n => {
         const item = document.createElement("div");
         item.className = `notification-item ${n.read ? "" : "unread"}`;
         item.dataset.id = n.id;
@@ -5726,13 +6158,13 @@ async function renderNotificationsPage() {
         item.innerHTML = `
             <div class="notification-icon"><span class="icon">${icon}</span></div>
             <div class="notification-content">
-                <h4>${n.type}</h4>
-                <p>${n.message}</p>
+                <h4>${escapeHtml(n.type || 'Notification')}</h4>
+                <p>${escapeHtml(n.message || '')}</p>
                 <span class="notification-time">${formatTimeAgo(n.createdAt)}</span>
             </div>
             <div class="notification-actions">
-                <button class="btn-icon" data-action="mark">✓</button>
-                <button class="btn-icon" data-action="dismiss">×</button>
+                <button class="btn-icon" data-action="mark" title="Mark as read">✓</button>
+                <button class="btn-icon" data-action="dismiss" title="Dismiss">×</button>
             </div>
         `;
 
@@ -5742,17 +6174,27 @@ async function renderNotificationsPage() {
     attachNotificationActions();
 }
 
-const markAllBtn = document.querySelector(".notification-actions .btn-secondary");
-if (markAllBtn && markAllBtn.textContent.includes("Mark All as Read")) {
-    markAllBtn.addEventListener("click", async () => {
-        const notifs = await loadUserNotifications();
-        for (const n of notifs) {
-            if (!n.read) {
-                await markNotificationAsRead(n.id);
-            }
+async function renderNotificationsPage() {
+    const list = document.getElementById("notificationsList");
+    if (!list) return;
+
+    allNotifications = await loadUserNotifications(); // Store globally for filtering
+    const notifications = allNotifications;
+
+    const unreadCount = notifications.filter(n => !n.read).length;
+    // show header summary at top of notifications list — hide header when there are no notifications
+    const header = document.getElementById('notificationsSummary');
+    if (header) {
+        if (notifications.length === 0) {
+            header.style.display = 'none';
+        } else {
+            header.style.display = '';
+            header.textContent = `You have ${notifications.length} notification${notifications.length !== 1 ? 's' : ''} (${unreadCount} unread)`;
         }
-        renderNotificationsPage();
-    });
+    }
+
+    // Use filter function to render
+    filterAndRenderNotifications();
 }
 
 function attachNotificationActions() {
@@ -5764,17 +6206,61 @@ function attachNotificationActions() {
         if (!btn) return;
 
         const item = btn.closest(".notification-item");
+        if (!item || !item.dataset.id) return; // guard: ignore clicks on empty-state or malformed items
+
         const id = item.dataset.id;
-        if (!id) return; // guard: ignore clicks on empty-state or malformed items
 
         if (btn.dataset.action === "mark") {
-            await markNotificationAsRead(id);
-            item.classList.remove("unread");
+            try {
+                await markNotificationAsRead(id);
+                item.classList.remove("unread");
+                // Update the notification in our global array
+                const notif = allNotifications.find(n => n.id === id);
+                if (notif) notif.read = true;
+                // Update summary
+                const unreadCount = allNotifications.filter(n => !n.read).length;
+                const header = document.getElementById('notificationsSummary');
+                if (header) {
+                    header.textContent = `You have ${allNotifications.length} notification${allNotifications.length !== 1 ? 's' : ''} (${unreadCount} unread)`;
+                }
+            } catch (err) {
+                console.error("Error marking notification as read:", err);
+                if (typeof showNotification === "function") {
+                    showNotification("Failed to mark as read", "error");
+                }
+            }
         }
 
         if (btn.dataset.action === "dismiss") {
-            await deleteDoc(doc(firebaseDb, "notifications", id));
-            item.remove();
+            try {
+                await deleteDoc(doc(firebaseDb, "notifications", id));
+                // Remove from global array
+                allNotifications = allNotifications.filter(n => n.id !== id);
+                // Animate removal
+                item.style.opacity = '0';
+                item.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    item.remove();
+                    // Update summary
+                    const unreadCount = allNotifications.filter(n => !n.read).length;
+                    const header = document.getElementById('notificationsSummary');
+                    if (header) {
+                        if (allNotifications.length === 0) {
+                            header.style.display = 'none';
+                        } else {
+                            header.style.display = '';
+                            header.textContent = `You have ${allNotifications.length} notification${allNotifications.length !== 1 ? 's' : ''} (${unreadCount} unread)`;
+                        }
+                    }
+                    // Re-filter if needed
+                    filterAndRenderNotifications();
+                }, 300);
+            } catch (err) {
+                console.error("Error dismissing notification:", err);
+                if (typeof showNotification === "function") {
+                    showNotification("Failed to dismiss notification", "error");
+                }
+            }
         }
     });
 }
@@ -5782,9 +6268,14 @@ function attachNotificationActions() {
 function getNotifIcon(type) {
     const icons = {
         "Question Liked": "👍",
+        "Answer Liked": "👍",
         "New Answer": "💬",
         "Paper Approved": "📄",
         "Paper Rejected": "❌",
+        "Paper Submitted": "📝",
+        "Paper Deleted": "🗑️",
+        "Question Posted": "❓",
+        "Answer Deleted": "🗑️",
         "Info": "ℹ️"
     };
     return icons[type] || "🔔";
@@ -5815,6 +6306,7 @@ function formatTimeAgo(timestamp) {
 
 // Auto-run only on notifications page
 if (window.location.pathname.includes("notifications.html")) {
+    initializeNotificationsFeatures();
     setTimeout(renderNotificationsPage, 300);
 }
 
@@ -6027,11 +6519,11 @@ async function performSearch(searchTerm) {
                 }
 
                     <div class="paper-actions">
-                        ${(data.fileUrl || data.url)
+                        ${isRemoteUrl(data.fileUrl || data.url)
                     ? `<a href="${escapeHtml(data.fileUrl || data.url)}" class="btn browse-btn" target="_blank">
                                          <i class="fas fa-file-pdf"></i> View Paper
                                      </a>`
-                    : ""
+                    : `<button class="btn browse-btn disabled" disabled title="No accessible file"><i class="fas fa-file-pdf"></i> View Paper</button>`
                 }
                         <button class="btn btn-save-library" data-title="${escapeHtml(data.title)}" data-authors="${escapeHtml(data.authors || '')}" data-category="${escapeHtml(data.category || '')}" data-abstract="${escapeHtml(data.abstract || '')}" data-year="${escapeHtml(data.year || '')}" data-url="${escapeHtml(data.fileUrl || data.url || '')}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status">
@@ -7713,9 +8205,26 @@ window.addEventListener("click", (e) => {
 
         try {
             const ref = doc(firebaseDb, "papers", id);
+            const snap = await getDoc(ref);
+
+            if (!snap.exists()) {
+                await showAlertModal("Paper not found.");
+                return;
+            }
+
+            const paperData = snap.data();
 
             // Option A (simple): delete document
             await deleteDoc(ref);
+
+            // Create notification for paper rejection
+            if (paperData.authorId) {
+                await createNotification(
+                    "Paper Rejected",
+                    `Your paper "${paperData.title || 'Untitled'}" has been rejected.`,
+                    paperData.authorId
+                );
+            }
 
             // Option B (if you want archive):
             // await updateDoc(ref, { status: "rejected", rejectedAt: serverTimestamp() });
@@ -7741,9 +8250,11 @@ window.addEventListener("click", (e) => {
         pendingPapersUnsubscribe = onSnapshot(
             q,
             (snap) => {
-                const docs = snapshot.docs
+                const docs = snap.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .sort((a, b) => a.title.localeCompare(b.title));
+                    .sort((a, b) => (String(a.title || '').localeCompare(String(b.title || ''))));
+
+                try { renderPendingPapers(docs); } catch (e) { console.error('Failed to render pending papers:', e); }
             },
             (err) => {
                 console.error("Listener error:", err);
@@ -7822,6 +8333,109 @@ window.addEventListener("click", (e) => {
 
 })();
 
+// === ADMIN: Analytics Modal for published papers ===
+(function () {
+    const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
+    const analyticsModal = document.getElementById('analyticsModal');
+    const closeAnalyticsModal = document.getElementById('closeAnalyticsModal');
+    const analyticsPapersBody = document.getElementById('analyticsPapersBody');
+    const analyticsSearch = document.getElementById('analyticsSearch');
+    const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+
+    async function loadAnalyticsPapers() {
+        if (!firebaseDb || !analyticsPapersBody) return;
+        analyticsPapersBody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+
+        try {
+            const publishedCol = collection(firebaseDb, 'publishedPapers');
+            const q = query(publishedCol, orderBy('createdAt', 'desc'));
+            const snap = await getDocs(q);
+
+            if (snap.empty) {
+                analyticsPapersBody.innerHTML = '<tr><td colspan="5">No published papers found.</td></tr>';
+                return;
+            }
+
+            const rows = [];
+            snap.forEach(docSnap => {
+                const d = docSnap.data() || {};
+                const id = docSnap.id;
+                const title = d.title || 'Untitled';
+                const authors = d.authors || d.authorName || '';
+                const category = d.category || '';
+                const publishedAt = d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toLocaleString() : new Date(d.createdAt).toLocaleString()) : '—';
+                rows.push({ id, title, authors, category, publishedAt, fileUrl: d.fileUrl || '' });
+            });
+
+            // Apply search filter if present
+            const qterm = analyticsSearch?.value?.trim().toLowerCase();
+            const filtered = qterm ? rows.filter(r => (r.title + ' ' + r.authors + ' ' + r.category).toLowerCase().includes(qterm)) : rows;
+
+            analyticsPapersBody.innerHTML = filtered.map(r => `
+                <tr>
+                    <td style="text-align:left; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(r.title)}</td>
+                    <td>${escapeHtml(r.authors)}</td>
+                    <td>${escapeHtml(r.category)}</td>
+                    <td>${escapeHtml(r.publishedAt)}</td>
+                    <td style="display:flex; gap:.5rem; justify-content:flex-end;">
+                        <a class="btn btn-secondary" target="_blank" rel="noopener" href="${escapeHtml(r.fileUrl || '#')}">View</a>
+                        <button class="btn btn-danger analytics-delete-btn" data-id="${r.id}">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            // Attach delete listeners
+            const delBtns = analyticsPapersBody.querySelectorAll('.analytics-delete-btn');
+            delBtns.forEach(b => b.addEventListener('click', async (e) => {
+                const id = e.target.dataset.id;
+                if (!id) return;
+                if (!(await showConfirmModal('Delete this published paper record? This will remove the Firestore document but will NOT remove the Cloudinary asset.'))) return;
+                try {
+                    await deleteDoc(doc(firebaseDb, 'publishedPapers', id));
+                    showNotification('Published paper record deleted', 'success');
+                    // refresh list
+                    await loadAnalyticsPapers();
+                } catch (err) {
+                    console.error('Failed to delete published paper:', err);
+                    showNotification('Failed to delete published paper', 'error');
+                }
+            }));
+
+        } catch (err) {
+            console.error('Error loading analytics papers:', err);
+            analyticsPapersBody.innerHTML = '<tr><td colspan="5">Failed to load published papers</td></tr>';
+        }
+    }
+
+    function openAnalytics() {
+        if (!analyticsModal) return;
+        analyticsModal.style.display = 'flex';
+        setTimeout(() => analyticsModal.classList.add('is-visible'), 10);
+        loadAnalyticsPapers();
+    }
+
+    function closeAnalytics() {
+        if (!analyticsModal) return;
+        analyticsModal.classList.remove('is-visible');
+        analyticsModal.style.display = 'none';
+    }
+
+    if (viewAnalyticsBtn) viewAnalyticsBtn.addEventListener('click', openAnalytics);
+    if (closeAnalyticsModal) closeAnalyticsModal.addEventListener('click', closeAnalytics);
+    if (refreshAnalyticsBtn) refreshAnalyticsBtn.addEventListener('click', loadAnalyticsPapers);
+    if (analyticsSearch) analyticsSearch.addEventListener('input', () => {
+        // debounce superficially
+        if (analyticsSearch._timer) clearTimeout(analyticsSearch._timer);
+        analyticsSearch._timer = setTimeout(loadAnalyticsPapers, 250);
+    });
+
+    // Close when clicking backdrop
+    window.addEventListener('click', (e) => {
+        if (e.target === analyticsModal) closeAnalytics();
+    });
+
+})();
+
 let papersCache = [];
 let activeCategory = null;
 const searchInputEl = document.getElementById('searchInput');
@@ -7880,7 +8494,7 @@ function renderPaperCard(paper) {
         <div class="result-header">
             <h4>${escapeHtml(paper.title)}</h4>
             <div class="result-actions">
-                <button class="btn btn-small view-btn">View</button>
+                <button class="btn btn-small view-btn" data-file-url="${escapeHtml(paper.fileUrl || '')}" data-paper-id="${escapeHtml(paper.id || '')}">View</button>
             </div>
         </div>
         <div class="result-meta">
