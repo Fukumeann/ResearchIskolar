@@ -22,7 +22,7 @@ import {
     arrayRemove
     , runTransaction
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-storage.js";
+// Firebase Storage is not used when uploading to Cloudinary; storage SDK import removed.
 
 
 
@@ -30,22 +30,103 @@ const firebaseConfig = {
     apiKey: "AIzaSyAM8d-8hBOSf6jeR6zClVHFPU8s-o8n33Y",
     authDomain: "researchscholar-d232c.firebaseapp.com",
     projectId: "researchscholar-d232c",
-    storageBucket: "researchscholar-d232c.firebasestorage.app",
+    // NOTE: Storage bucket should usually be the `*.appspot.com` bucket name.
+    // If your Firebase console shows a different bucket, use that exact value.
+    storageBucket: "researchscholar-d232c.appspot.com",
     messagingSenderId: "140321397579",
     appId: "1:140321397579:web:966748afc14576562fa6ce",
     measurementId: "G-2SD4G9E6D3"
 };
 
+// Cloudinary client-side config (unsigned uploads)
+// Replace these values with your Cloudinary account details and the unsigned upload preset you created.
+const CLOUDINARY_CLOUD_NAME = "dekq1vljn"; // e.g. 'demo'
+const CLOUDINARY_UNSIGNED_PRESET = "researchisko"; // e.g. 'unsigned_preset'
+
+// Upload helper for Cloudinary (unsigned). Returns secure_url on success.
+async function uploadToCloudinaryUnsigned(file) {
+    if (!CLOUDINARY_CLOUD_NAME || CLOUDINARY_CLOUD_NAME === 'YOUR_CLOUD_NAME') {
+        throw new Error('Cloudinary cloud name not configured. Set CLOUDINARY_CLOUD_NAME in app.js');
+    }
+    if (!CLOUDINARY_UNSIGNED_PRESET || CLOUDINARY_UNSIGNED_PRESET === 'YOUR_UPLOAD_PRESET') {
+        throw new Error('Cloudinary unsigned preset not configured. Set CLOUDINARY_UNSIGNED_PRESET in app.js');
+    }
+
+    const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('upload_preset', CLOUDINARY_UNSIGNED_PRESET);
+
+    const resp = await fetch(url, { method: 'POST', body: form });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        const err = new Error(`Cloudinary upload failed: ${resp.status} ${resp.statusText} ${text}`);
+        err.status = resp.status;
+        throw err;
+    }
+
+    const data = await resp.json();
+    if (!data.secure_url) throw new Error('Cloudinary did not return a secure_url');
+    return data.secure_url;
+}
+
+// Admin helper: delete all documents in `publishedPapers` (use cautiously)
+async function deleteAllPublishedPapers() {
+    if (!firebaseDb) {
+        throw new Error('Firestore not initialized');
+    }
+
+    const publishedCol = collection(firebaseDb, 'publishedPapers');
+    // fetch up to 500 documents to avoid runaway loops; adjust if you have more
+    const q = query(publishedCol, orderBy('createdAt', 'desc'), limit(500));
+    const snap = await getDocs(q);
+
+    const ids = [];
+    snap.forEach(d => ids.push(d.id));
+
+    for (const id of ids) {
+        try {
+            await deleteDoc(doc(firebaseDb, 'publishedPapers', id));
+        } catch (err) {
+            console.error('Failed to delete publishedPapers/' + id, err);
+        }
+    }
+
+    return ids.length;
+}
+
+// UI-facing confirm wrapper you can call from the browser console: `deleteAllPublishedPapersConfirm()`
+async function deleteAllPublishedPapersConfirm() {
+    const ok = await showConfirmModal('This will PERMANENTLY delete up to 500 documents from the `publishedPapers` collection. Do you want to continue?');
+    if (!ok) {
+        showNotification('Deletion cancelled', 'info');
+        return 0;
+    }
+
+    try {
+        const count = await deleteAllPublishedPapers();
+        await showAlertModal(`Deleted ${count} published paper(s).`, 'Deletion Complete');
+        console.log(`Deleted ${count} published paper(s).`);
+        return count;
+    } catch (err) {
+        console.error('Error deleting published papers:', err);
+        await showAlertModal('Error while deleting published papers: ' + (err.message || err), 'Deletion Error');
+        return 0;
+    }
+}
+
+// Expose helper on window for convenience (call from DevTools)
+window.deleteAllPublishedPapersConfirm = deleteAllPublishedPapersConfirm;
+
 
 
 // Initialize Firebase
-let firebaseApp, firebaseAuth, googleProvider, firebaseDb, firebaseStorage;
+let firebaseApp, firebaseAuth, googleProvider, firebaseDb;
 
 try {
     firebaseApp = initializeApp(firebaseConfig);
     firebaseAuth = getAuth(firebaseApp);
     firebaseDb = getFirestore(firebaseApp);
-    firebaseStorage = getStorage(firebaseApp);
     googleProvider = new GoogleAuthProvider();
 
     console.log("Firebase connected:", firebaseApp.name);
@@ -878,6 +959,34 @@ function attachPaperCardActionListeners() {
     attachPaperCardActionListeners._installed = true;
 
     document.addEventListener('click', async function (e) {
+        // Handle view buttons/links (browse results & rendered cards)
+        const viewBtn = e.target.closest('.view-btn, .btn-view, .browse-btn');
+        if (viewBtn) {
+            // If it's an anchor (`a`) let it behave normally unless JS should open it.
+            const isAnchor = viewBtn.tagName === 'A' || viewBtn.tagName === 'a';
+            const fileUrl = viewBtn.dataset?.fileUrl || viewBtn.getAttribute('href') || '';
+
+            if (fileUrl && isRemoteUrl(fileUrl)) {
+                // Defensive: ensure the URL is safe and open in a new tab
+                try {
+                    const win = window.open(fileUrl, '_blank');
+                    if (win) win.focus();
+                } catch (err) {
+                    // Fallback: set location
+                    window.location.href = fileUrl;
+                }
+            } else if (fileUrl && !isRemoteUrl(fileUrl)) {
+                // URL exists but is a local path (file:// or C:\...), which browsers block.
+                showAlertModal('This paper points to a local file on your machine (file://...).\n\nBrowsers cannot open local files from a web page for security reasons.\n\nUpload the PDF to the server or Cloudinary and update the paper record with a remote URL to view it here.');
+            } else if (!isAnchor) {
+                showNotification('No file URL available for this paper', 'warning');
+            }
+
+            // Prevent other handlers from interfering for button clicks
+            e.preventDefault();
+            return;
+        }
+
         const saveBtn = e.target.closest('.btn-save-library');
         if (saveBtn) {
             e.preventDefault();
@@ -2418,7 +2527,7 @@ async function renderUserLibrary() {
                     <div class="result-header">
                         <h4>${escapeHtml(paper.title || '')}</h4>
                         <div class="result-actions">
-                            ${viewUrl ? `<a class="btn browse-btn" target="_blank" rel="noopener" href="${escapeHtml(viewUrl)}" title="View Paper"><i class="fas fa-file-pdf"></i> View Paper</a>` : ''}
+                            ${isRemoteUrl(viewUrl) ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(viewUrl)}" title="View Paper"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No accessible file"><i class="fas fa-file-pdf"></i> View</button>`}
                             <button class="btn btn-remove-library" data-title="${escapeHtml(paper.title || '')}" data-type="${escapeHtml(paper.type || 'saved')}" title="Remove from library"><i class="fas fa-trash-alt"></i> Remove</button>
                         </div>
                     </div>
@@ -2623,7 +2732,7 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${paper.url ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(paper.url)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        ${paper.url ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(paper.url)}"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No file"><i class="fas fa-file-pdf"></i> View</button>`}
                         <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authors || paper.authorName || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(paper.fileUrl || paper.url || '')}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status"><i class="fas fa-clock"></i> Pending Review</span>
                     </div>
@@ -2656,7 +2765,7 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
                     <div class="paper-actions">
-                        ${fileUrl ? `<a class="btn browse-btn" target="_blank" href="${escapeHtml(fileUrl)}"><i class="fas fa-file-pdf"></i> View Paper</a>` : ""}
+                        ${fileUrl ? `<a class="btn btn-view" target="_blank" rel="noopener noreferrer" href="${escapeHtml(fileUrl)}"><i class="fas fa-file-pdf"></i> View</a>` : `<button class="btn btn-view disabled" disabled title="No file"><i class="fas fa-file-pdf"></i> View</button>`}
                         <button class="btn btn-save-library" data-title="${escapeHtml(paper.title)}" data-authors="${escapeHtml(paper.authorName || paper.authors || '')}" data-category="${escapeHtml(paper.category || '')}" data-abstract="${escapeHtml(paper.abstract || '')}" data-year="${escapeHtml(paper.year || '')}" data-url="${escapeHtml(fileUrl)}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status"><i class="fas fa-check-circle"></i> Published</span>
                     </div>
@@ -2768,22 +2877,12 @@ function initializePublishedFeatures() {
                     return;
                 }
 
-                // Upload the file to Firebase Storage
-                const storagePath = `papers/${user.uid}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-                const storageReference = storageRef(firebaseStorage, storagePath);
-
+                // Upload the file to Cloudinary (unsigned preset)
                 const originalSubmitHTML = e.submitter ? e.submitter.innerHTML : null;
                 if (e.submitter) { e.submitter.disabled = true; e.submitter.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...'; }
 
-                const downloadURL = await new Promise((resolve, reject) => {
-                    const uploadTask = uploadBytesResumable(storageReference, file);
-                    uploadTask.on('state_changed', (snapshot) => {
-                        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-                        if (e.submitter) e.submitter.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Uploading ${pct}%`;
-                    }, (err) => reject(err), async () => {
-                        try { const url = await getDownloadURL(uploadTask.snapshot.ref); resolve(url); } catch (e) { reject(e); }
-                    });
-                });
+                // Use Cloudinary unsigned upload helper (returns secure_url)
+                const downloadURL = await uploadToCloudinaryUnsigned(file);
 
                 if (e.submitter) { e.submitter.disabled = false; e.submitter.innerHTML = originalSubmitHTML || '<i class="fas fa-paper-plane"></i> Submit for Review'; }
 
@@ -2812,7 +2911,12 @@ function initializePublishedFeatures() {
 
             } catch (err) {
                 console.error("Submission error:", err);
-                showNotificationModal("Error", "Submission failed. Please try again.", "error");
+                try {
+                    showUploadError(err);
+                } catch (e) {
+                    showNotificationModal("Error", "Submission failed. Please try again.", "error");
+                }
+                if (e.submitter) { e.submitter.disabled = false; e.submitter.innerHTML = originalSubmitHTML || '<i class="fas fa-paper-plane"></i> Submit for Review'; }
             }
         });
     }
@@ -2937,15 +3041,8 @@ function initializePublishedFeatures() {
                 return;
             }
 
-            const storagePath = `papers/${user.uid}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-            const storageReference = storageRef(firebaseStorage, storagePath);
-
-            const downloadURL = await new Promise((resolve, reject) => {
-                const uploadTask = uploadBytesResumable(storageReference, file);
-                uploadTask.on('state_changed', null, (err) => reject(err), async () => {
-                    try { resolve(await getDownloadURL(uploadTask.snapshot.ref)); } catch (e) { reject(e); }
-                });
-            });
+            // Upload to Cloudinary unsigned (client-side)
+            const downloadURL = await uploadToCloudinaryUnsigned(file);
 
             console.log("Delegated handler: submitting to Firestore...");
             await addDoc(collection(firebaseDb, "papers"), {
@@ -2973,7 +3070,11 @@ function initializePublishedFeatures() {
             if (typeof loadMergedPapers === "function") setTimeout(loadMergedPapers, 400);
         } catch (err) {
             console.error("Delegated handler: submission error", err);
-            if (typeof showNotificationModal === "function") showNotificationModal("Error", "Submission failed. Try again.", "error");
+            try {
+                showUploadError(err);
+            } catch (e) {
+                if (typeof showNotificationModal === "function") showNotificationModal("Error", "Submission failed. Try again.", "error");
+            }
         }
     }, true /* useCapture to catch earlier */);
 
@@ -3043,6 +3144,16 @@ function showNotificationModal(title, message, type = "info") {
     modal.onclick = (e) => {
         if (e.target === modal) closeModal();
     };
+}
+
+// Show a more detailed upload error to help diagnose CORS/auth issues
+function showUploadError(err) {
+    console.error('Storage upload error detail:', err);
+    const details = err && (err.message || err.code) ? `${err.code || ''} ${err.message || ''}`.trim() : String(err);
+    const hint = 'Possible causes: CORS not configured on the Storage bucket, incorrect bucket name, or authentication/permission issues.';
+    const advice = 'Check DevTools Network panel for the OPTIONS preflight response and run the gsutil `cors get`/`set` steps.';
+    const message = details ? `${details} — ${hint} ${advice}` : `${hint} ${advice}`;
+    showNotificationModal('Upload Error', message, 'error');
 }
 
 
@@ -5479,6 +5590,16 @@ if (typeof escapeHtml !== 'function') {
     }
 }
 
+// Helper to determine whether a URL is a safe remote resource we can open from the browser
+function isRemoteUrl(url) {
+    if (!url) return false;
+    try {
+        return /^(https?:|blob:|data:)/i.test(String(url).trim());
+    } catch (e) {
+        return false;
+    }
+}
+
 // Simple modal alert helper (returns a Promise resolved when user dismisses)
 function showAlertModal(message, title = 'Notice', opts = {}) {
     return new Promise((resolve) => {
@@ -6027,11 +6148,11 @@ async function performSearch(searchTerm) {
                 }
 
                     <div class="paper-actions">
-                        ${(data.fileUrl || data.url)
+                        ${isRemoteUrl(data.fileUrl || data.url)
                     ? `<a href="${escapeHtml(data.fileUrl || data.url)}" class="btn browse-btn" target="_blank">
                                          <i class="fas fa-file-pdf"></i> View Paper
                                      </a>`
-                    : ""
+                    : `<button class="btn browse-btn disabled" disabled title="No accessible file"><i class="fas fa-file-pdf"></i> View Paper</button>`
                 }
                         <button class="btn btn-save-library" data-title="${escapeHtml(data.title)}" data-authors="${escapeHtml(data.authors || '')}" data-category="${escapeHtml(data.category || '')}" data-abstract="${escapeHtml(data.abstract || '')}" data-year="${escapeHtml(data.year || '')}" data-url="${escapeHtml(data.fileUrl || data.url || '')}"><i class="fas fa-book"></i> Save</button>
                         <span class="paper-status">
@@ -7741,9 +7862,11 @@ window.addEventListener("click", (e) => {
         pendingPapersUnsubscribe = onSnapshot(
             q,
             (snap) => {
-                const docs = snapshot.docs
+                const docs = snap.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .sort((a, b) => a.title.localeCompare(b.title));
+                    .sort((a, b) => (String(a.title || '').localeCompare(String(b.title || ''))));
+
+                try { renderPendingPapers(docs); } catch (e) { console.error('Failed to render pending papers:', e); }
             },
             (err) => {
                 console.error("Listener error:", err);
@@ -7822,6 +7945,109 @@ window.addEventListener("click", (e) => {
 
 })();
 
+// === ADMIN: Analytics Modal for published papers ===
+(function () {
+    const viewAnalyticsBtn = document.getElementById('viewAnalyticsBtn');
+    const analyticsModal = document.getElementById('analyticsModal');
+    const closeAnalyticsModal = document.getElementById('closeAnalyticsModal');
+    const analyticsPapersBody = document.getElementById('analyticsPapersBody');
+    const analyticsSearch = document.getElementById('analyticsSearch');
+    const refreshAnalyticsBtn = document.getElementById('refreshAnalyticsBtn');
+
+    async function loadAnalyticsPapers() {
+        if (!firebaseDb || !analyticsPapersBody) return;
+        analyticsPapersBody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+
+        try {
+            const publishedCol = collection(firebaseDb, 'publishedPapers');
+            const q = query(publishedCol, orderBy('createdAt', 'desc'));
+            const snap = await getDocs(q);
+
+            if (snap.empty) {
+                analyticsPapersBody.innerHTML = '<tr><td colspan="5">No published papers found.</td></tr>';
+                return;
+            }
+
+            const rows = [];
+            snap.forEach(docSnap => {
+                const d = docSnap.data() || {};
+                const id = docSnap.id;
+                const title = d.title || 'Untitled';
+                const authors = d.authors || d.authorName || '';
+                const category = d.category || '';
+                const publishedAt = d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toLocaleString() : new Date(d.createdAt).toLocaleString()) : '—';
+                rows.push({ id, title, authors, category, publishedAt, fileUrl: d.fileUrl || '' });
+            });
+
+            // Apply search filter if present
+            const qterm = analyticsSearch?.value?.trim().toLowerCase();
+            const filtered = qterm ? rows.filter(r => (r.title + ' ' + r.authors + ' ' + r.category).toLowerCase().includes(qterm)) : rows;
+
+            analyticsPapersBody.innerHTML = filtered.map(r => `
+                <tr>
+                    <td style="text-align:left; max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(r.title)}</td>
+                    <td>${escapeHtml(r.authors)}</td>
+                    <td>${escapeHtml(r.category)}</td>
+                    <td>${escapeHtml(r.publishedAt)}</td>
+                    <td style="display:flex; gap:.5rem; justify-content:flex-end;">
+                        <a class="btn btn-secondary" target="_blank" rel="noopener" href="${escapeHtml(r.fileUrl || '#')}">View</a>
+                        <button class="btn btn-danger analytics-delete-btn" data-id="${r.id}">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            // Attach delete listeners
+            const delBtns = analyticsPapersBody.querySelectorAll('.analytics-delete-btn');
+            delBtns.forEach(b => b.addEventListener('click', async (e) => {
+                const id = e.target.dataset.id;
+                if (!id) return;
+                if (!(await showConfirmModal('Delete this published paper record? This will remove the Firestore document but will NOT remove the Cloudinary asset.'))) return;
+                try {
+                    await deleteDoc(doc(firebaseDb, 'publishedPapers', id));
+                    showNotification('Published paper record deleted', 'success');
+                    // refresh list
+                    await loadAnalyticsPapers();
+                } catch (err) {
+                    console.error('Failed to delete published paper:', err);
+                    showNotification('Failed to delete published paper', 'error');
+                }
+            }));
+
+        } catch (err) {
+            console.error('Error loading analytics papers:', err);
+            analyticsPapersBody.innerHTML = '<tr><td colspan="5">Failed to load published papers</td></tr>';
+        }
+    }
+
+    function openAnalytics() {
+        if (!analyticsModal) return;
+        analyticsModal.style.display = 'flex';
+        setTimeout(() => analyticsModal.classList.add('is-visible'), 10);
+        loadAnalyticsPapers();
+    }
+
+    function closeAnalytics() {
+        if (!analyticsModal) return;
+        analyticsModal.classList.remove('is-visible');
+        analyticsModal.style.display = 'none';
+    }
+
+    if (viewAnalyticsBtn) viewAnalyticsBtn.addEventListener('click', openAnalytics);
+    if (closeAnalyticsModal) closeAnalyticsModal.addEventListener('click', closeAnalytics);
+    if (refreshAnalyticsBtn) refreshAnalyticsBtn.addEventListener('click', loadAnalyticsPapers);
+    if (analyticsSearch) analyticsSearch.addEventListener('input', () => {
+        // debounce superficially
+        if (analyticsSearch._timer) clearTimeout(analyticsSearch._timer);
+        analyticsSearch._timer = setTimeout(loadAnalyticsPapers, 250);
+    });
+
+    // Close when clicking backdrop
+    window.addEventListener('click', (e) => {
+        if (e.target === analyticsModal) closeAnalytics();
+    });
+
+})();
+
 let papersCache = [];
 let activeCategory = null;
 const searchInputEl = document.getElementById('searchInput');
@@ -7880,7 +8106,7 @@ function renderPaperCard(paper) {
         <div class="result-header">
             <h4>${escapeHtml(paper.title)}</h4>
             <div class="result-actions">
-                <button class="btn btn-small view-btn">View</button>
+                <button class="btn btn-small view-btn" data-file-url="${escapeHtml(paper.fileUrl || '')}" data-paper-id="${escapeHtml(paper.id || '')}">View</button>
             </div>
         </div>
         <div class="result-meta">
