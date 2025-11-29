@@ -86,23 +86,23 @@
             <p>Share your research with the academic community. Fill out the details below to submit your paper for
                 review.</p>
 
-            <form id="paperUploadForm" class="form-container">
+            <form id="submitPaperForm" class="form-container">
                 <div class="form-grid">
                     <div class="form-group full-width">
-                        <label for="paperTitle">Paper Title</label>
-                        <input type="text" id="paperTitle" class="form-input"
+                        <label for="submitPaperTitle">Paper Title</label>
+                        <input type="text" id="submitPaperTitle" class="form-input"
                             placeholder="Enter the full title of your research paper" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="paperAuthors">Authors</label>
-                        <input type="text" id="paperAuthors" class="form-input"
+                        <label for="submitPaperAuthors">Authors</label>
+                        <input type="text" id="submitPaperAuthors" class="form-input"
                             placeholder="List all authors (separated by commas)" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="paperCategory">Category</label>
-                        <select id="paperCategory" class="form-select">
+                        <label for="submitPaperCategory">Category</label>
+                        <select id="submitPaperCategory" class="form-select">
                             <option value="">Select a category</option>
                             <option>Computer Science</option>
                             <option>Medicine</option>
@@ -115,21 +115,33 @@
                         </select>
                     </div>
 
+                    <div class="form-group">
+                        <label for="submitPaperYear">Year</label>
+                        <input type="number" id="submitPaperYear" class="form-input" placeholder="e.g., 2024" min="1900"
+                            max="2100">
+                    </div>
+
                     <div class="form-group full-width">
-                        <label for="paperAbstract">Abstract</label>
-                        <textarea id="paperAbstract" class="form-textarea"
+                        <label for="submitPaperAbstract">Abstract</label>
+                        <textarea id="submitPaperAbstract" class="form-textarea"
                             placeholder="Provide a brief summary of your research paper" rows="5" required></textarea>
                     </div>
 
                     <div class="form-group">
-                        <label for="paperTags">Tags</label>
-                        <input type="text" id="paperTags" class="form-input"
+                        <label for="submitPaperTags">Tags</label>
+                        <input type="text" id="submitPaperTags" class="form-input"
                             placeholder="e.g., Machine Learning, Data Analysis (comma-separated)">
                     </div>
 
                     <div class="form-group">
-                        <label for="paperFileUrl">Paper URL</label>
-                        <input type="url" id="paperFileUrl" class="form-input" placeholder="Link to your paper (PDF)">
+                        <label for="submitPaperFileInput">Upload Paper (PDF)</label>
+                        <div class="file-upload" id="submitPaperFileUpload">
+                            <input type="file" id="submitPaperFileInput" class="form-input" accept="application/pdf" />
+                            <div class="file-hint">Drop a PDF here or click to choose — max 20MB</div>
+                            <div class="file-preview" id="submitPaperFilePreview"
+                                style="display:none; margin-top:.5rem;">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
