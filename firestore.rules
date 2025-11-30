@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // HELPERS
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.email in [
+        "responsojohncarlo7@gmail.com",
+        "anotheradmin@gmail.com"
+      ];
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // USERS
+    match /users/{userId} {
+      allow read: if resource.data.role != "banned" || isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && request.resource.data.role == "user";
+      allow update: if (
+        isAdmin() ||
+        (
+          isOwner(userId) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotedQuestionIds'])
+          )
+        )
+      );
+      allow delete: if isAdmin();
+
+      match /library/{docId=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // LEGACY PAPERS
+    match /papers/{paperId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.authorId || isAdmin());
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // PUBLISHED PAPERS — simplified for real-time listeners + public search
+    match /publishedPapers/{paperId} {
+      // read (get/list): allow if approved (public + authenticated), admin, or the author reading their own doc
+      // Public (unauthenticated) can search/read approved papers
+      allow read: if isAdmin()
+                  || resource.data.status == "approved"
+                  || (isAuthenticated() && resource.data.authorId == request.auth.uid);
+
+      // create: authenticated authors can submit their own paper with status === 'pending'
+      allow create: if isAuthenticated()
+                    && request.auth.uid == request.resource.data.authorId
+                    && request.resource.data.status == "pending"
+                    && request.resource.data.title is string
+                    && (request.resource.data.fileUrl is string || request.resource.data.url is string);
+
+      // update: admins may update anything; authors may update their own metadata but not moderation fields
+      allow update: if isAuthenticated() && (
+                        isAdmin()
+                        ||
+                        (
+                          request.auth.uid == resource.data.authorId
+                          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status','approvedAt','rejectedAt'])
+                        )
+                    );
+
+      // delete: admin or author may delete
+      allow delete: if isAuthenticated() && (isAdmin() || request.auth.uid == resource.data.authorId);
+    }
+
+    // QUESTIONS + RESPONSES
+    match /questions/{questionId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.authorId;
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorId || isAdmin());
+
+      allow update: if isAuthenticated() && (
+        isAdmin()
+        ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes','upvotedBy','updatedAt','views','viewedBy'])
+      );
+
+      match /responses/{responseId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && request.auth.uid == request.resource.data.authorId;
+        allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.authorId || isAdmin());
+      }
+    }
+
+    // ANSWERS
+    match /answers/{answerId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.authorId;
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.authorId || isAdmin());
+      allow update: if isAuthenticated() && (
+        isAdmin()
+        ||
+        request.auth.uid == resource.data.authorId
+        ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes','upvotedBy','updatedAt'])
+      );
+    }
+
+    // NOTIFICATIONS — allow users to read/update/delete their own notifications
+    match /notifications/{notificationId} {
+      allow create: if isAuthenticated()
+                    && (request.resource.data.createdBy == request.auth.uid || isAdmin())
+                    && request.resource.data.userId is string
+                    && request.resource.data.type is string
+                    && request.resource.data.message is string
+                    && (request.resource.data.keys().hasOnly([
+                      'userId', 'type', 'message', 'createdBy', 'read', 'createdAt',
+                      'questionId', 'answerId', 'paperId', 'commentId'
+                    ]));
+
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+
+      allow update: if isAuthenticated() && (
+                      (request.auth.uid == resource.data.userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt']))
+                      || isAdmin()
+                    );
+
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

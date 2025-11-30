@@ -3030,6 +3030,7 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                         <span><i class="fas fa-user"></i> ${escapeHtml(paper.authors || paper.authorName || '—')}</span>
                         <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
                         ${paper.year ? `<span><i class="fas fa-calendar"></i> ${escapeHtml(String(paper.year))}</span>` : ''}
+                        <span><i class="fas fa-clock"></i> ${formatTimeAgo(paper.submittedAt || paper.uploadedAt || paper.createdAt)}</span>
                     </div>
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
@@ -3067,6 +3068,7 @@ function displayMergedUserPapers({ submissions = [], published = [] } = {}) {
                         <span><i class="fas fa-user"></i> ${escapeHtml(paper.authorName || paper.authors || '—')}</span>
                         <span><i class="fas fa-tag"></i> ${escapeHtml(paper.category || '')}</span>
                         ${paper.year ? `<span><i class="fas fa-calendar"></i> ${escapeHtml(String(paper.year))}</span>` : ''}
+                        <span><i class="fas fa-clock"></i> ${formatTimeAgo(paper.publishedAt || paper.approvedAt || paper.createdAt)}</span>
                     </div>
                     <p class="paper-abstract">${paper.abstract}</p>
                     ${tags}
@@ -4003,6 +4005,7 @@ async function loadQuestionsIAnswered() {
 }
 
 async function handleQuestionUpvote(questionId) {
+    console.log('🔵 handleQuestionUpvote called with questionId:', questionId);
     try {
         if (!firebaseAuth.currentUser) {
             showNotification("Please log in to upvote.", "warning");
@@ -4023,6 +4026,8 @@ async function handleQuestionUpvote(questionId) {
         const questionAuthorId = questionData.authorId;
         const questionTitle = questionData.title || "your question";
         const hasUpvoted = questionData.upvotedBy?.includes(currentUserId);
+        
+        console.log('📊 Pre-transaction state:', { hasUpvoted, questionId, questionAuthorId, currentUserId });
 
         // TOGGLE UPVOTE (safely using a transaction so upvotes never go below 0)
         await runTransaction(firebaseDb, async (tx) => {
@@ -4056,12 +4061,28 @@ async function handleQuestionUpvote(questionId) {
         });
 
         // SEND NOTIF TO QUESTION AUTHOR ONLY WHEN UPVOTE WAS ADDED (not removed)
-        if (!hasUpvoted && currentUserId !== questionAuthorId) {
-            await createNotification(
-                "Question Liked",
-                `${firebaseAuth.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
-                questionAuthorId
-            );
+        // Re-fetch fresh data to check actual post-transaction state
+        try {
+            const refreshedDoc = await getDoc(questionRef);
+            const refreshedData = refreshedDoc.data() || {};
+            const nowUpvoted = (refreshedData.upvotedBy || []).includes(currentUserId);
+            
+            console.log('📊 Post-transaction state:', { hasUpvoted, nowUpvoted, shouldNotify: !hasUpvoted && nowUpvoted && currentUserId !== questionAuthorId, questionId });
+            
+            // Only notify if the user just added an upvote (wasn't upvoted before, but is now)
+            if (!hasUpvoted && nowUpvoted && currentUserId !== questionAuthorId) {
+                console.log('📝 Creating Question Liked notification with questionId:', questionId);
+                await createNotification(
+                    "Question Liked",
+                    `${firebaseAuth.currentUser.displayName || "Someone"} liked your question "${questionTitle}"`,
+                    questionAuthorId,
+                    { questionId }  // Pass metadata for navigation
+                );
+            } else {
+                console.log('⏭️ Skipping notification:', { hasUpvoted, nowUpvoted, isSameUser: currentUserId === questionAuthorId });
+            }
+        } catch (err) {
+            console.warn('Failed to create notification after upvote:', err);
         }
         console.log("Upvote toggled successfully");
 
@@ -4523,6 +4544,7 @@ function displayQuestions(questions, tabType) {
 
     // Attach delegated click handler for upvote/comment stats (idempotent)
     if (!questionsContainer.__stat_listener_attached) {
+        console.log('🎯 Attaching delegated click handler to questionsContainer');
         questionsContainer.addEventListener('click', async (ev) => {
             const up = ev.target.closest('.upvote-stat');
             const comment = ev.target.closest('.comment-stat');
@@ -4531,6 +4553,7 @@ function displayQuestions(questions, tabType) {
                 ev.preventDefault();
                 ev.stopPropagation();
                 const questionId = up.dataset.id;
+                console.log('⬆️ Upvote click detected, questionId:', questionId, 'element:', up);
 
                 // Prevent clicking when no user
                 if (!currentUser) {
@@ -4559,7 +4582,9 @@ function displayQuestions(questions, tabType) {
 
                 // perform DB toggle
                 try {
+                    console.log('🔄 About to call toggleUpvote with questionId:', questionId);
                     await toggleUpvote(questionId, 'question');
+                    console.log('✅ toggleUpvote completed');
                 } catch (err) {
                     console.error('Upvote toggle failed:', err);
                     showNotification('Failed to toggle upvote', 'error');
@@ -4772,14 +4797,21 @@ window.viewQuestionDetail = async function (questionId) {
         }
 
         // Update view count in UI
-        el("questionDetailViews").textContent = updatedViews;
+        const viewsEl = document.getElementById("questionDetailViews");
+        if (viewsEl) viewsEl.textContent = updatedViews;
 
         // Populate title, author, category, text, tags
-        questionDetailTitle.textContent = q.title || "";
-        questionDetailAuthor.textContent = q.authorName || "Anonymous";
-        questionDetailCategory.textContent = q.category || "";
-        questionDetailText.textContent = q.details || "";
-        questionDetailTags.innerHTML = (q.tags || [])
+        const titleEl = document.getElementById("questionDetailTitle");
+        const authorEl = document.getElementById("questionDetailAuthor");
+        const categoryEl = document.getElementById("questionDetailCategory");
+        const textEl = document.getElementById("questionDetailText");
+        const tagsEl = document.getElementById("questionDetailTags");
+        
+        if (titleEl) titleEl.textContent = q.title || "";
+        if (authorEl) authorEl.textContent = q.authorName || "Anonymous";
+        if (categoryEl) categoryEl.textContent = q.category || "";
+        if (textEl) textEl.textContent = q.details || "";
+        if (tagsEl) tagsEl.innerHTML = (q.tags || [])
             .map(t => `<span class="tag">${escapeHtml(t)}</span>`)
             .join("");
 
@@ -4795,17 +4827,19 @@ window.viewQuestionDetail = async function (questionId) {
 
         if (createdDate) {
             // Relative time under title (e.g., "3 hours ago")
-            questionDetailDate.textContent = getTimeAgo(q.createdAt);
+            const dateEl = document.getElementById("questionDetailDate");
+            if (dateEl) dateEl.textContent = getTimeAgo(q.createdAt);
 
             // Full timestamp in "Asked on ..."
             const fullDate = createdDate.toLocaleString();
-            const askedOnEl = el("questionDetailDateSmall");
+            const askedOnEl = document.getElementById("questionDetailDateSmall");
             if (askedOnEl) {
                 askedOnEl.textContent = fullDate;
             }
         } else {
-            questionDetailDate.textContent = "";
-            const askedOnEl = el("questionDetailDateSmall");
+            const dateEl = document.getElementById("questionDetailDate");
+            if (dateEl) dateEl.textContent = "";
+            const askedOnEl = document.getElementById("questionDetailDateSmall");
             if (askedOnEl) {
                 askedOnEl.textContent = "";
             }
@@ -4815,10 +4849,12 @@ window.viewQuestionDetail = async function (questionId) {
         try {
             const responsesRef = collection(firebaseDb, "questions", questionId, "responses");
             const rSnap = await getDocs(responsesRef);
-            el("questionDetailAnswers").textContent = rSnap.size;
+            const answersEl = document.getElementById("questionDetailAnswers");
+            if (answersEl) answersEl.textContent = rSnap.size;
         } catch (err) {
             console.warn("Failed to compute real answer count:", err);
-            el("questionDetailAnswers").textContent = q.answers || 0;
+            const answersEl = document.getElementById("questionDetailAnswers");
+            if (answersEl) answersEl.textContent = q.answers || 0;
         }
 
         // Upvotes - check if current user has upvoted
@@ -4829,7 +4865,8 @@ window.viewQuestionDetail = async function (questionId) {
         const upvoteBtn = document.getElementById("upvoteQuestionBtn");
         console.log("Upvote button element:", upvoteBtn);
 
-        el("questionDetailUpvotes").textContent = Math.max(0, q.upvotes || 0);
+        const upvotesEl = document.getElementById("questionDetailUpvotes");
+        if (upvotesEl) upvotesEl.textContent = Math.max(0, q.upvotes || 0);
 
         if (upvoteBtn) {
             console.log("✅ Upvote button found, attaching handler");
@@ -5096,6 +5133,7 @@ window.submitAnswer = async function (questionId) {
     let questionRef = null;
     let questionTitle = "";
     let questionAuthorId = null;
+    let answerId = null;  // Store the newly created answer ID
 
     try {
         // sanity checks
@@ -5156,8 +5194,9 @@ window.submitAnswer = async function (questionId) {
 
         // write to subcollection /questions/{questionId}/responses
         const responsesRef = collection(firebaseDb, "questions", questionId, "responses");
-        await addDoc(responsesRef, payload);
-        console.log("submitAnswer: response doc added");
+        const docRef = await addDoc(responsesRef, payload);
+        answerId = docRef.id;  // Capture the newly created answer ID
+        console.log("submitAnswer: response doc added with id:", answerId);
 
         // increment answer count on parent question (atomic)
         questionRef = doc(firebaseDb, "questions", questionId);
@@ -5231,10 +5270,12 @@ window.submitAnswer = async function (questionId) {
 
         // Only notify if there is an author and it's not the current user
         if (questionAuthorId && currentUser && questionAuthorId !== currentUser.uid) {
+            console.log("📝 Creating notification for new answer:", { questionId, answerId, questionAuthorId });
             await createNotification(
                 "New Answer",
                 `${currentUser.displayName || "Someone"} answered your question "${questionTitle}"`,
-                questionAuthorId
+                questionAuthorId,
+                { questionId, answerId }  // Pass metadata for navigation
             );
         }
     } catch (err) {
@@ -5626,6 +5667,7 @@ function getTimeAgo(timestamp) {
 
 // Toggle upvote on question or answer
 async function toggleUpvote(itemId, type = 'question') {
+    console.log('🔄 toggleUpvote called:', { itemId, type });
     if (!currentUser) {
         showNotification('Please log in to upvote', 'warning');
         showModal(elements.loginModal);
@@ -5694,8 +5736,22 @@ async function toggleUpvote(itemId, type = 'question') {
                 if (ownerId && ownerId !== currentUser.uid) {
                     const nType = type === 'question' ? 'Question Liked' : 'Answer Liked';
                     const nMessage = `${currentUser.displayName || currentUser.email || 'Someone'} liked your ${type}.`;
-                    await createNotification(nType, nMessage, ownerId);
+                    const metadata = type === 'question' ? { questionId: itemId } : { answerId: itemId, questionId: window.currentQuestionId };
+                    console.log('💾 toggleUpvote creating notification:', { 
+                        nType, 
+                        nMessage, 
+                        ownerId, 
+                        metadata, 
+                        itemId, 
+                        type,
+                        willNotify: true
+                    });
+                    await createNotification(nType, nMessage, ownerId, metadata);
+                } else {
+                    console.log('⏭️ Skipping notification - same user or no owner:', { ownerId, currentUserUid: currentUser.uid });
                 }
+            } else {
+                console.log('⏭️ Skipping notification - upvote not added:', { priorUpvoted, nowUpvoted });
             }
         } catch (e) {
             console.warn('Failed to send notification after upvote toggle:', e);
@@ -6228,18 +6284,35 @@ console.log('💡 To manually check questions, run: verifyQuestionsDisplay()');
 
 
 // NOTIFICATIONS (kept, cleaned, standardized)
-async function createNotification(type, message, targetUserId = null) {
+// Enhanced createNotification that stores metadata for navigation
+// metadata object can include: questionId, answerId, paperId, commentId, etc.
+async function createNotification(type, message, targetUserId = null, metadata = {}) {
     if (!firebaseDb || !firebaseAuth.currentUser) return;
 
     try {
-        await addDoc(collection(firebaseDb, "notifications"), {
+        console.log('💾 Saving notification with metadata:', { type, targetUserId, metadata });
+        
+        // Build the complete object that will be stored
+        const notificationData = {
             type,
             message,
             userId: targetUserId || firebaseAuth.currentUser.uid,
             createdBy: firebaseAuth.currentUser.uid,
             read: false,
-            createdAt: serverTimestamp()
-        });
+            createdAt: serverTimestamp(),
+            ...metadata  // Store questionId, answerId, paperId, etc.
+        };
+        
+        console.log('🔍 EXACT object being written to Firestore:', notificationData);
+        
+        const docRef = await addDoc(collection(firebaseDb, "notifications"), notificationData);
+        console.log('✅ Notification saved successfully with docId:', docRef.id);
+        
+        // Verify what was actually saved by reading it back immediately
+        const savedDoc = await getDoc(docRef);
+        const savedData = savedDoc.data();
+        console.log('🔍 VERIFICATION - Data actually saved in Firestore:', savedData);
+        
     } catch (error) {
         console.error("Error creating notification:", error);
     }
@@ -6522,6 +6595,9 @@ function filterAndRenderNotifications() {
         item.dataset.id = n.id;
 
         const icon = getNotifIcon(n.type);
+        
+        // Debug: log notification with all fields to check metadata
+        console.log('📬 Rendering notification:', { id: n.id, type: n.type, questionId: n.questionId, answerId: n.answerId, paperId: n.paperId });
 
         item.innerHTML = `
             <div class="notification-icon"><span class="icon">${icon}</span></div>
@@ -6535,6 +6611,23 @@ function filterAndRenderNotifications() {
                 <button class="btn-icon" data-action="dismiss" title="Dismiss">×</button>
             </div>
         `;
+        
+        // Add click handler on the notification content to navigate to source
+        const contentDiv = item.querySelector('.notification-content');
+        if (contentDiv) {
+            contentDiv.style.cursor = 'pointer';
+            contentDiv.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await navigateToNotificationSource(n);
+                } catch (err) {
+                    console.error('Error navigating to notification source:', err);
+                    if (typeof showNotification === 'function') {
+                        showNotification('Unable to navigate to source', 'error');
+                    }
+                }
+            });
+        }
 
         list.appendChild(item);
     });
@@ -6563,6 +6656,59 @@ async function renderNotificationsPage() {
 
     // Use filter function to render
     filterAndRenderNotifications();
+}
+
+// Navigate to the source of a notification (question, answer, paper, etc.)
+async function navigateToNotificationSource(notification) {
+    const { type, questionId, answerId, paperId } = notification;
+    
+    console.log('🔔 Navigating to notification source:', { type, questionId, answerId, paperId, notification });
+    
+    // Mark as read when navigating
+    if (!notification.read && notification.id) {
+        try {
+            await markNotificationAsRead(notification.id);
+        } catch (err) {
+            console.warn('Failed to mark notification as read:', err);
+        }
+    }
+    
+    // Navigate based on notification type and metadata
+    if (type && type.includes('Question')) {
+        // Redirect to question detail
+        if (questionId) {
+            console.log('📌 Opening question:', questionId);
+            // Navigate to questions page first
+            window.location.href = `questions.html?questionId=${encodeURIComponent(questionId)}`;
+        } else {
+            console.warn('⚠️ No questionId in notification');
+        }
+    } else if (type && type.includes('Answer')) {
+        // Redirect to question with answer highlighted
+        if (questionId) {
+            console.log('📌 Opening question with answer:', { questionId, answerId });
+            // Navigate to questions page with answer anchor
+            window.location.href = `questions.html?questionId=${encodeURIComponent(questionId)}${answerId ? `&answerId=${encodeURIComponent(answerId)}` : ''}`;
+        } else {
+            console.warn('⚠️ No questionId in notification');
+        }
+    } else if (type && (type.includes('Paper') || type.includes('paper'))) {
+        // Redirect to published page if it's a paper notification
+        console.log('📄 Opening published page with paper:', paperId);
+        // First navigate to published page
+        const link = document.querySelector('a[href*="published"]');
+        if (link) link.click();
+        
+        // If paperId is available, optionally scroll to or highlight the paper
+        if (paperId) {
+            setTimeout(() => {
+                const paperEl = document.querySelector(`[data-paper-id="${paperId}"]`);
+                if (paperEl) paperEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 800);
+        }
+    } else {
+        console.warn('⚠️ Unknown notification type:', type);
+    }
 }
 
 function attachNotificationActions() {
@@ -6667,9 +6813,16 @@ function formatTimeAgo(timestamp) {
 
     const diff = (Date.now() - timeMs) / 1000; // seconds
     if (diff < 60) return "Just now";
-    if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
-    return `${Math.floor(diff / 86400)} days ago`;
+    if (diff < 3600) {
+        const minutes = Math.floor(diff / 60);
+        return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    }
+    if (diff < 86400) {
+        const hours = Math.floor(diff / 3600);
+        return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    }
+    const days = Math.floor(diff / 86400);
+    return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
 
 // Auto-run only on notifications page
@@ -6876,6 +7029,7 @@ async function performSearch(searchTerm) {
           <div class="paper-meta">
             <span><i class="fas fa-user"></i> ${data.authors}</span>
             <span><i class="fas fa-tag"></i> ${data.category}</span>
+            <span><i class="fas fa-clock"></i> ${formatTimeAgo(data.publishedAt || data.approvedAt || data.createdAt)}</span>
           </div>
 
           <p class="paper-abstract">${data.abstract}</p>
@@ -8563,7 +8717,8 @@ window.addEventListener("click", (e) => {
         await createNotification(
             "Paper Approved",
             `Your paper "${paperData.title}" has been approved and published!`,
-            paperData.authorId
+            paperData.authorId,
+            { paperId: id }  // Pass paperId for navigation
         );
     }
 
