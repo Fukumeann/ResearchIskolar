@@ -84,7 +84,7 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         isAdmin()
         ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes','upvotedBy','updatedAt','views','viewedBy'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes','upvotedBy','updatedAt','views','viewedBy','answers'])
       );
 
       match /responses/{responseId} {
@@ -108,17 +108,13 @@ service cloud.firestore {
       );
     }
 
-    // NOTIFICATIONS — allow users to read/update/delete their own notifications
+    // NOTIFICATIONS — allow authenticated users to create notifications
     match /notifications/{notificationId} {
-      allow create: if isAuthenticated()
-                    && (request.resource.data.createdBy == request.auth.uid || isAdmin())
+      allow create: if isAuthenticated() 
                     && request.resource.data.userId is string
                     && request.resource.data.type is string
                     && request.resource.data.message is string
-                    && (request.resource.data.keys().hasOnly([
-                      'userId', 'type', 'message', 'createdBy', 'read', 'createdAt',
-                      'questionId', 'answerId', 'paperId', 'commentId'
-                    ]));
+                    && request.resource.data.createdBy is string;
 
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
 

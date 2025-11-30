@@ -6287,7 +6287,21 @@ console.log('💡 To manually check questions, run: verifyQuestionsDisplay()');
 // Enhanced createNotification that stores metadata for navigation
 // metadata object can include: questionId, answerId, paperId, commentId, etc.
 async function createNotification(type, message, targetUserId = null, metadata = {}) {
-    if (!firebaseDb || !firebaseAuth.currentUser) return;
+    console.log('🔔 START createNotification');
+    console.log('📍 firebaseDb:', !!firebaseDb);
+    console.log('📍 firebaseAuth:', !!firebaseAuth);
+    console.log('📍 firebaseAuth.currentUser:', !!firebaseAuth?.currentUser);
+    console.log('🔔 createNotification called with:', { type, message, targetUserId, metadata, currentUser: firebaseAuth?.currentUser?.uid });
+    
+    if (!firebaseDb) {
+        console.error('❌ firebaseDb not initialized');
+        return;
+    }
+    
+    if (!firebaseAuth.currentUser) {
+        console.error('❌ firebaseAuth.currentUser not available');
+        return;
+    }
 
     try {
         console.log('💾 Saving notification with metadata:', { type, targetUserId, metadata });
@@ -6304,17 +6318,18 @@ async function createNotification(type, message, targetUserId = null, metadata =
         };
         
         console.log('🔍 EXACT object being written to Firestore:', notificationData);
+        console.log('📋 userId field:', notificationData.userId, 'type:', typeof notificationData.userId);
+        console.log('🔐 createdBy field:', notificationData.createdBy, 'type:', typeof notificationData.createdBy);
+        console.log('📝 type field:', notificationData.type, 'type:', typeof notificationData.type);
         
         const docRef = await addDoc(collection(firebaseDb, "notifications"), notificationData);
         console.log('✅ Notification saved successfully with docId:', docRef.id);
         
-        // Verify what was actually saved by reading it back immediately
-        const savedDoc = await getDoc(docRef);
-        const savedData = savedDoc.data();
-        console.log('🔍 VERIFICATION - Data actually saved in Firestore:', savedData);
-        
     } catch (error) {
-        console.error("Error creating notification:", error);
+        console.error("❌ Error creating notification:", error);
+        console.error("📌 Error code:", error.code);
+        console.error("📌 Error message:", error.message);
+        if (error.details) console.error("📌 Error details:", error.details);
     }
 }
 
@@ -7029,6 +7044,7 @@ async function performSearch(searchTerm) {
           <div class="paper-meta">
             <span><i class="fas fa-user"></i> ${data.authors}</span>
             <span><i class="fas fa-tag"></i> ${data.category}</span>
+            ${data.year ? `<span><i class="fas fa-calendar"></i> ${data.year}</span>` : ''}
             <span><i class="fas fa-clock"></i> ${formatTimeAgo(data.publishedAt || data.approvedAt || data.createdAt)}</span>
           </div>
 
