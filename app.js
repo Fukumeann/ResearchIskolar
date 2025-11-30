@@ -6805,14 +6805,15 @@ async function performSearch(searchTerm) {
 
 
         if (isAdmin) {
-            // admin can see all papers
+            // admin can see all papers (no where filter required for admins)
             papersQuery = query(
                 collection(firebaseDb, "publishedPapers")
             );
         } else {
-            // regular users: only approved papers
+            // regular users + unauthenticated: only approved papers (include where filter for rules compliance)
             papersQuery = query(
                 collection(firebaseDb, "publishedPapers"),
+                where("status", "==", "approved")
             );
         }
 
