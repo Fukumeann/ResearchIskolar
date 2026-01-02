@@ -205,6 +205,42 @@
 
         <!-- Firebase + App Script -->
         <script type="module" src="app.js"></script>
+
+        <!-- Handle notification redirects with URL parameters -->
+        <script>
+            // Check for questionId in URL params (from notification redirect)
+            function handleQuestionRedirect() {
+                const params = new URLSearchParams(window.location.search);
+                const questionId = params.get('questionId');
+                const answerId = params.get('answerId');
+
+                if (questionId) {
+                    console.log('🔗 Question redirect detected from URL params, questionId:', questionId);
+                    // Wait for viewQuestionDetail to be defined
+                    const checkAndOpen = setInterval(() => {
+                        if (typeof window.viewQuestionDetail === 'function') {
+                            clearInterval(checkAndOpen);
+                            window.viewQuestionDetail(questionId).then(() => {
+                                if (answerId) {
+                                    setTimeout(() => {
+                                        const answerEl = document.querySelector(`[data-answer-id="${answerId}"]`);
+                                        if (answerEl) {
+                                            answerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        }
+                                    }, 500);
+                                }
+                            }).catch(err => console.error('Error opening question:', err));
+                        }
+                    }, 100);
+
+                    // Timeout after 5 seconds
+                    setTimeout(() => clearInterval(checkAndOpen), 5000);
+                }
+            }
+
+            // Run on page load
+            document.addEventListener('DOMContentLoaded', handleQuestionRedirect);
+        </script>
 </body>
 
 </html>

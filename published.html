@@ -89,30 +89,37 @@
             <form id="submitPaperForm" class="form-container">
                 <div class="form-grid">
                     <div class="form-group full-width">
-                        <label for="submitPaperTitle">Paper Title</label>
+                        <label for="submitPaperTitle">Paper Title *</label>
                         <input type="text" id="submitPaperTitle" class="form-input"
                             placeholder="Enter the full title of your research paper" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="submitPaperAuthors">Authors</label>
+                        <label for="submitPaperAuthors">Authors *</label>
                         <input type="text" id="submitPaperAuthors" class="form-input"
                             placeholder="List all authors (separated by commas)" required>
                     </div>
 
                     <div class="form-group">
-                        <label for="submitPaperCategory">Category</label>
-                        <select id="submitPaperCategory" class="form-select">
+                        <label for="submitPaperCategory">Category *</label>
+                        <select id="submitPaperCategory" class="form-select" required>
                             <option value="">Select a category</option>
-                            <option>Computer Science</option>
-                            <option>Medicine</option>
-                            <option>Physics</option>
-                            <option>Chemistry</option>
-                            <option>Biology</option>
-                            <option>Psychology</option>
-                            <option>Economics</option>
-                            <option>Mathematics</option>
+                            <option value="Computer Science">Computer Science</option>
+                            <option value="Medicine">Medicine</option>
+                            <option value="Physics">Physics</option>
+                            <option value="Chemistry">Chemistry</option>
+                            <option value="Biology">Biology</option>
+                            <option value="Psychology">Psychology</option>
+                            <option value="Economics">Economics</option>
+                            <option value="Mathematics">Mathematics</option>
+                            <option value="Other">Other</option>
                         </select>
+                        <div id="submitPaperCategoryOtherGroup" class="form-group-other" aria-hidden="true"
+                            style="display:none; margin-top:0.75rem;">
+                            <label for="submitPaperCategoryOther">Please specify</label>
+                            <input id="submitPaperCategoryOther" aria-hidden="true" class="form-input"
+                                placeholder="Describe the category (e.g. Philosophy, Sociology)">
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -122,21 +129,25 @@
                     </div>
 
                     <div class="form-group full-width">
-                        <label for="submitPaperAbstract">Abstract</label>
+                        <label for="submitPaperAbstract">Abstract *</label>
                         <textarea id="submitPaperAbstract" class="form-textarea"
                             placeholder="Provide a brief summary of your research paper" rows="5" required></textarea>
                     </div>
 
-                    <div class="form-group">
-                        <label for="submitPaperTags">Tags</label>
+                    <div class="form-group full-width">
+                        <label for="submitPaperTags">Tags (comma-separated)</label>
                         <input type="text" id="submitPaperTags" class="form-input"
                             placeholder="e.g., Machine Learning, Data Analysis (comma-separated)">
+                        <small style="color: #666; font-size: 0.85rem; display: block; margin-top: 0.25rem;">
+                            Add relevant tags to help others find your paper
+                        </small>
                     </div>
 
-                    <div class="form-group">
-                        <label for="submitPaperFileInput">Upload Paper (PDF)</label>
+                    <div class="form-group full-width">
+                        <label for="submitPaperFileInput">Upload Paper (PDF) *</label>
                         <div class="file-upload" id="submitPaperFileUpload">
-                            <input type="file" id="submitPaperFileInput" class="form-input" accept="application/pdf" />
+                            <input type="file" id="submitPaperFileInput" class="form-input" accept="application/pdf"
+                                required />
                             <div class="file-hint">Drop a PDF here or click to choose — max 20MB</div>
                             <div class="file-preview" id="submitPaperFilePreview"
                                 style="display:none; margin-top:.5rem;">
@@ -179,8 +190,8 @@
         </div>
     </div>
 
-    <!-- Firebase + App Script -->
-    <script type="module" src="app.js"></script>
+    <!-- Firebase + App Script (cache-busted) -->
+    <script type="module" src="app.js?v=3"></script>
 </body>
 
 </html>
