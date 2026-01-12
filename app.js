@@ -470,11 +470,11 @@ async function checkIfUserBanned(user) {
     return false; // User not banned
 }
 
-// --- Notifications unread badge handling (navbar) ---
+// Notifications unread badge handling (navbar) 
 let _notificationsUnsubscribe = null;
 function updateNotificationsBadge(count = 0) {
     // find the navbar notifications link (by href or icon)
-    const navLink = document.querySelector('a[href="notifications.html"]');
+    const navLink = document.querySelector('a[href="notifications.html"]'); 
     if (!navLink) return;
 
     // create badge if missing
@@ -483,7 +483,6 @@ function updateNotificationsBadge(count = 0) {
         badge = document.createElement('span');
         badge.id = 'notificationsBadge';
         badge.className = 'nav-badge';
-        // small style fallback in case CSS not present
         badge.style.minWidth = '18px';
         badge.style.height = '18px';
         badge.style.lineHeight = '18px';
@@ -539,6 +538,43 @@ function subscribeToUnreadNotifications(uid) {
         } catch (fallbackErr) {
             console.error('Failed to subscribe to unread notifications (fallback):', fallbackErr);
         }
+    }
+}
+
+// Real-time subscription used by the notifications page (renders list live)
+let _notificationsPageUnsubscribe = null;
+function subscribeToNotifications(uid) {
+    if (!firebaseDb || !uid) return;
+    if (_notificationsPageUnsubscribe) { try { _notificationsPageUnsubscribe(); } catch (e) { } _notificationsPageUnsubscribe = null; }
+
+    const ref = collection(firebaseDb, 'notifications');
+    try {
+        const q = query(ref, where('userId', '==', uid), orderBy('createdAt', 'desc'), limit(200));
+        _notificationsPageUnsubscribe = onSnapshot(q, snap => {
+            allNotifications = [];
+            snap.forEach(d => allNotifications.push({ id: d.id, ...d.data() }));
+
+            const unreadCount = allNotifications.filter(n => !n.read).length;
+            updateNotificationsBadge(unreadCount);
+
+            // Update header summary if present
+            const header = document.getElementById('notificationsSummary');
+            if (header) {
+                if (allNotifications.length === 0) {
+                    header.style.display = 'none';
+                } else {
+                    header.style.display = '';
+                    header.textContent = `You have ${allNotifications.length} notification${allNotifications.length !== 1 ? 's' : ''} (${unreadCount} unread)`;
+                }
+            }
+
+            // Re-render filtered view
+            filterAndRenderNotifications();
+        }, err => {
+            console.warn('Notifications realtime listener error:', err);
+        });
+    } catch (err) {
+        console.warn('Failed to subscribe to notifications realtime:', err);
     }
 }
 // UNIVERSAL ACCESS RESTRICTED MODAL
@@ -3349,7 +3385,7 @@ function initializePublishedFeatures() {
 
                 if (e.submitter) { e.submitter.disabled = false; e.submitter.innerHTML = originalSubmitHTML || '<i class="fas fa-paper-plane"></i> Submit for Review'; }
 
-                await addDoc(collection(firebaseDb, "publishedPapers"), {
+                const paperDocRef = await addDoc(collection(firebaseDb, "publishedPapers"), {
                     title,
                     authors,
                     category,
@@ -3364,11 +3400,12 @@ function initializePublishedFeatures() {
                     status: "pending"
                 });
 
-                // Create notification for paper submission
+                // Create notification for paper submission (include paperId)
                 await createNotification(
                     "Paper Submitted",
                     `Your paper "${title}" has been submitted and is pending review.`,
-                    user.uid
+                    user.uid,
+                    { paperId: paperDocRef.id }
                 );
 
                 showNotificationModal("Success!", "Your paper was submitted for review.", "success");
@@ -3598,7 +3635,7 @@ function initializePublishedFeatures() {
             const downloadURL = await uploadToCloudinaryUnsigned(file);
 
             console.log("Delegated handler: submitting to Firestore...");
-            await addDoc(collection(firebaseDb, "publishedPapers"), {
+            const paperDocRef = await addDoc(collection(firebaseDb, "publishedPapers"), {
                 title,
                 authors,
                 category,
@@ -3621,7 +3658,8 @@ function initializePublishedFeatures() {
                 await createNotification(
                     "Paper Submitted",
                     `Your paper "${title}" has been submitted and is pending review.`,
-                    user.uid
+                    user.uid,
+                    { paperId: paperDocRef.id }
                 );
             }
 
@@ -6149,7 +6187,8 @@ async function submitQuestion() {
         await createNotification(
             "Question Posted",
             `Your question "${title}" has been posted successfully.`,
-            currentUser.uid
+            currentUser.uid,
+            { questionId: docRef.id }
         );
 
         submitBtn.innerHTML = '<i class="fas fa-check"></i> Posted!';
@@ -6556,6 +6595,23 @@ function initializeNotificationsFeatures() {
             }
         });
     }
+
+    // Start a realtime subscription to notifications when on the notifications page
+    try {
+        const uid = firebaseAuth?.currentUser?.uid;
+        if (uid) {
+            subscribeToNotifications(uid);
+        } else if (firebaseAuth) {
+            onAuthStateChanged(firebaseAuth, (user) => {
+                if (user) subscribeToNotifications(user.uid);
+                else {
+                    if (_notificationsPageUnsubscribe) { try { _notificationsPageUnsubscribe(); } catch (e) { } _notificationsPageUnsubscribe = null; }
+                }
+            });
+        }
+    } catch (err) {
+        console.warn('Failed to initialize realtime notifications subscription:', err);
+    }
 }
 
 function filterAndRenderNotifications() {
@@ -6688,42 +6744,107 @@ async function navigateToNotificationSource(notification) {
         }
     }
 
+    // If a direct URL was provided in the notification, prefer it
+    if (notification.url || notification.targetUrl) {
+        const dest = notification.url || notification.targetUrl;
+        try {
+            window.location.href = dest;
+            return;
+        } catch (err) {
+            console.warn('Failed to navigate to notification URL:', dest, err);
+        }
+    }
+
     // Navigate based on notification type and metadata
     if (type && type.includes('Question')) {
-        // Redirect to question detail
         if (questionId) {
-            console.log('📌 Opening question:', questionId);
-            // Navigate to questions page first
             window.location.href = `questions.html?questionId=${encodeURIComponent(questionId)}`;
-        } else {
-            console.warn('⚠️ No questionId in notification');
+            return;
         }
-    } else if (type && type.includes('Answer')) {
-        // Redirect to question with answer highlighted
+
+        // Try to extract a quoted title from the message and lookup the question by title
+        const titleMatch = (notification.message || '').match(/"([^"]+)"/);
+        if (titleMatch && titleMatch[1]) {
+            const qTitle = titleMatch[1];
+            try {
+                const questionsCol = collection(firebaseDb, 'questions');
+                const q = query(questionsCol, where('title', '==', qTitle), limit(1));
+                const snaps = await getDocs(q);
+                if (!snaps.empty) {
+                    const first = snaps.docs[0];
+                    const foundId = first.id;
+                    window.location.href = `questions.html?questionId=${encodeURIComponent(foundId)}`;
+                    return;
+                }
+            } catch (err) {
+                console.warn('Question lookup by title failed:', err);
+            }
+
+            // If lookup failed, fallback to search by title on questions page
+            window.location.href = `questions.html?search=${encodeURIComponent(qTitle)}`;
+            return;
+        }
+
+        // Final fallback: open questions list
+        console.warn('⚠️ No questionId in notification — opening questions list');
+        window.location.href = 'questions.html';
+        return;
+    }
+
+    if (type && type.includes('Answer')) {
         if (questionId) {
-            console.log('📌 Opening question with answer:', { questionId, answerId });
-            // Navigate to questions page with answer anchor
             window.location.href = `questions.html?questionId=${encodeURIComponent(questionId)}${answerId ? `&answerId=${encodeURIComponent(answerId)}` : ''}`;
-        } else {
-            console.warn('⚠️ No questionId in notification');
+            return;
         }
-    } else if (type && (type.includes('Paper') || type.includes('paper'))) {
-        // Redirect to published page if it's a paper notification
-        console.log('📄 Opening published page with paper:', paperId);
-        // First navigate to published page
+
+        // Try to extract question title and lookup by title
+        const titleMatch = (notification.message || '').match(/"([^"]+)"/);
+        if (titleMatch && titleMatch[1]) {
+            const qTitle = titleMatch[1];
+            try {
+                const questionsCol = collection(firebaseDb, 'questions');
+                const q = query(questionsCol, where('title', '==', qTitle), limit(1));
+                const snaps = await getDocs(q);
+                if (!snaps.empty) {
+                    const foundId = snaps.docs[0].id;
+                    window.location.href = `questions.html?questionId=${encodeURIComponent(foundId)}${answerId ? `&answerId=${encodeURIComponent(answerId)}` : ''}`;
+                    return;
+                }
+            } catch (err) {
+                console.warn('Answer notification lookup by title failed:', err);
+            }
+
+            // Fallback to search on questions page including answerId
+            window.location.href = `questions.html?search=${encodeURIComponent(qTitle)}${answerId ? `&answerId=${encodeURIComponent(answerId)}` : ''}`;
+            return;
+        }
+
+        console.warn('⚠️ No questionId in notification for answer — opening questions list');
+        window.location.href = 'questions.html';
+        return;
+    }
+
+    if (type && (type.includes('Paper') || type.includes('paper'))) {
+        // For paper notifications prefer opening a direct paper detail when paperId present
+        if (paperId) {
+            window.location.href = `published.html?paperId=${encodeURIComponent(paperId)}`;
+            return;
+        }
+
+        // Fallback: open published list and try to highlight after navigation
         const link = document.querySelector('a[href*="published"]');
         if (link) link.click();
-
-        // If paperId is available, optionally scroll to or highlight the paper
         if (paperId) {
             setTimeout(() => {
                 const paperEl = document.querySelector(`[data-paper-id="${paperId}"]`);
                 if (paperEl) paperEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 800);
         }
-    } else {
-        console.warn('⚠️ Unknown notification type:', type);
+        return;
     }
+
+    // Last resort: unknown type — open notifications page root or show warning
+    console.warn('⚠️ Unknown notification type or missing metadata:', type);
 }
 
 function attachNotificationActions() {
@@ -8761,7 +8882,8 @@ window.addEventListener("click", (e) => {
                 await createNotification(
                     "Paper Rejected",
                     `Your paper "${paperData.title || 'Untitled'}" has been rejected.`,
-                    paperData.authorId
+                    paperData.authorId,
+                    { paperId: id }
                 );
             }
 
